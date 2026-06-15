@@ -10,6 +10,10 @@
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder --mac --dir",
     "dist": "npm run build && electron-builder --mac",
+    "dist:mac": "npm run build && electron-builder --mac --universal",
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:linux": "npm run build && electron-builder --linux --x64",
+    "prepare:release-env": "node scripts/write-release-env.mjs",
     "install:local": "node scripts/install-local.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
@@ -29,6 +33,7 @@
     "directories": {
       "output": "dist"
     },
+    "artifactName": "WayBetter-Calendar-${os}-${arch}.${ext}",
     "files": [
       "out/**/*",
       "resources/**/*",
@@ -44,8 +49,20 @@
         "zip"
       ]
     },
-    "dmg": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    "win": {
+      "icon": "resources/waybetter-calendar-icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "category": "Office",
+      "icon": "resources/waybetter-calendar-icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
   },
   "devDependencies": {
