@@ -18,7 +18,7 @@ Fill in `.env` with your own provider credentials before connecting real account
 
 Calendar providers:
 
-- Google Calendar: `WAYBETTER_GOOGLE_CLIENT_ID`, optional `WAYBETTER_GOOGLE_CLIENT_SECRET`
+- Google Calendar: `WAYBETTER_GOOGLE_CLIENT_ID`, optional `WAYBETTER_GOOGLE_REDIRECT_PORT`
 - Microsoft 365 Calendar: `WAYBETTER_MICROSOFT_CLIENT_ID`, optional `WAYBETTER_MICROSOFT_REDIRECT_PORT`
 
 Video providers:
@@ -48,6 +48,8 @@ Full distributable artifacts:
 ```sh
 npm run dist
 ```
+
+Release builds read public OAuth defaults from `resources/release.env` and write a generated `resources/.env` during packaging. Keep only public client IDs and redirect ports there; do not package OAuth client secrets into downloadable builds.
 
 ## Security
 

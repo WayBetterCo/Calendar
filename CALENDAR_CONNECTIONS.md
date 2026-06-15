@@ -8,12 +8,15 @@ Set:
 
 ```sh
 WAYBETTER_GOOGLE_CLIENT_ID=...
-WAYBETTER_GOOGLE_CLIENT_SECRET=... # optional, depends on your OAuth client
+WAYBETTER_GOOGLE_REDIRECT_PORT=53682
+WAYBETTER_GOOGLE_CLIENT_SECRET=... # optional for local development only; never package into public releases
 ```
 
 Existing `DAYLINE_*` environment variable names are still accepted as compatibility aliases.
 
-Use a Google OAuth client that can use loopback redirects. WayBetter Calendar opens the system browser and receives the callback on `http://127.0.0.1:<dynamic-port>/oauth/google/callback`.
+Use a Google OAuth client that can use loopback redirects. WayBetter Calendar opens the system browser and receives the callback on `http://localhost:53682/oauth/google/callback` in release builds. If you change `WAYBETTER_GOOGLE_REDIRECT_PORT`, register the matching callback URL in Google Cloud.
+
+Release builds package only public OAuth client IDs and redirect ports. Do not add Google client secrets to `resources/release.env`, GitHub Actions variables, or GitHub Actions secrets for public desktop releases.
 
 Scopes requested:
 
@@ -35,6 +38,8 @@ WAYBETTER_MICROSOFT_REDIRECT_PORT=53685
 ```
 
 Use an Entra app registration that allows public client flows. WayBetter Calendar opens the system browser and receives the callback on `http://localhost:<port>/oauth/microsoft/callback`. If `WAYBETTER_MICROSOFT_REDIRECT_PORT` is omitted, the app uses an available dynamic loopback port.
+
+Release builds default to `http://localhost:53685/oauth/microsoft/callback`.
 
 Scopes requested:
 

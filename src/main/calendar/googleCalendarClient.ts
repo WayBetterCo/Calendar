@@ -83,6 +83,8 @@ export const googleCalendarService: CalendarService = {
       provider: 'google',
       authorizationUrl,
       scopes: GOOGLE_SCOPES,
+      port: optionalNumberEnv('WAYBETTER_GOOGLE_REDIRECT_PORT'),
+      redirectHost: 'localhost',
     });
 
     const tokenBody = new URLSearchParams({
@@ -386,6 +388,11 @@ function requiredEnv(name: string, label: string): string {
 
 function optionalEnv(name: string): string | undefined {
   return process.env[name] ?? process.env[legacyEnvName(name)];
+}
+
+function optionalNumberEnv(name: string): number | undefined {
+  const value = optionalEnv(name);
+  return value ? Number(value) : undefined;
 }
 
 function legacyEnvName(name: string): string {

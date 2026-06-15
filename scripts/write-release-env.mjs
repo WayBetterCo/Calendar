@@ -3,17 +3,15 @@ import { dirname, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 
 loadDotenv();
+loadDotenv({ path: resolve('resources/release.env'), override: false });
 
 const outputPath = resolve('resources/.env');
 
 const entries = [
   ['WAYBETTER_GOOGLE_CLIENT_ID', valueFor('WAYBETTER_GOOGLE_CLIENT_ID', 'DAYLINE_GOOGLE_CLIENT_ID')],
+  ['WAYBETTER_GOOGLE_REDIRECT_PORT', valueFor('WAYBETTER_GOOGLE_REDIRECT_PORT', 'DAYLINE_GOOGLE_REDIRECT_PORT') ?? '53682'],
   ['WAYBETTER_MICROSOFT_CLIENT_ID', valueFor('WAYBETTER_MICROSOFT_CLIENT_ID', 'DAYLINE_MICROSOFT_CLIENT_ID')],
   ['WAYBETTER_MICROSOFT_REDIRECT_PORT', valueFor('WAYBETTER_MICROSOFT_REDIRECT_PORT', 'DAYLINE_MICROSOFT_REDIRECT_PORT') ?? '53685'],
-  ['WAYBETTER_ZOOM_CLIENT_ID', valueFor('WAYBETTER_ZOOM_CLIENT_ID', 'DAYLINE_ZOOM_CLIENT_ID')],
-  ['WAYBETTER_ZOOM_REDIRECT_PORT', valueFor('WAYBETTER_ZOOM_REDIRECT_PORT', 'DAYLINE_ZOOM_REDIRECT_PORT') ?? '53683'],
-  ['WAYBETTER_TEAMS_CLIENT_ID', valueFor('WAYBETTER_TEAMS_CLIENT_ID', 'DAYLINE_TEAMS_CLIENT_ID')],
-  ['WAYBETTER_TEAMS_REDIRECT_PORT', valueFor('WAYBETTER_TEAMS_REDIRECT_PORT', 'DAYLINE_TEAMS_REDIRECT_PORT') ?? '53684'],
 ].filter((entry) => Boolean(entry[1]));
 
 mkdirSync(dirname(outputPath), { recursive: true });

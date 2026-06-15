@@ -11,6 +11,7 @@ export function loadAppEnv(): void {
     process.env.DAYLINE_ENV_FILE,
     join(app.getPath('userData'), '.env'),
     join(app.getPath('appData'), legacyStorageName, '.env'),
+    join(app.getAppPath(), 'resources', '.env'),
     join(process.resourcesPath, '.env'),
     join(dirname(process.execPath), '.env'),
     join(process.cwd(), '.env'),
