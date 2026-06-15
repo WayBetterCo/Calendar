@@ -22,9 +22,6 @@ jobs:
           - name: Windows
             os: windows-latest
             command: npm run dist:win
-          - name: Linux
-            os: ubuntu-22.04
-            command: npm run dist:linux
 
     steps:
       - name: Check out repository
@@ -50,10 +47,6 @@ jobs:
           WAYBETTER_TEAMS_CLIENT_ID: ${{ vars.WAYBETTER_TEAMS_CLIENT_ID || secrets.WAYBETTER_TEAMS_CLIENT_ID }}
           WAYBETTER_TEAMS_REDIRECT_PORT: ${{ vars.WAYBETTER_TEAMS_REDIRECT_PORT || '53684' }}
 
-      - name: Install Linux packaging dependencies
-        if: matrix.name == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools libfuse2
-
       - name: Typecheck
         run: npm run typecheck
 
@@ -73,8 +66,6 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.exe
-            dist/*.AppImage
-            dist/*.deb
           if-no-files-found: error
 
   release:
