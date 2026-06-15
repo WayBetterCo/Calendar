@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build ${{ matrix.name }}
@@ -17,7 +21,7 @@ jobs:
       matrix:
         include:
           - name: macOS
-            os: macos-13
+            os: macos-latest
             command: npm run dist:mac
           - name: Windows
             os: windows-latest
