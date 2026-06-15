@@ -1,7 +1,7 @@
 {
   "name": "waybetter-calendar",
   "productName": "WayBetter Calendar",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A slim desktop calendar app.",
   "homepage": "https://www.thewaybetter.co",
   "main": "./out/main/index.js",
