@@ -62,8 +62,7 @@
       "maintainer": "WayBetter <hello@thewaybetter.co>",
       "icon": "resources/waybetter-calendar-icon.png",
       "target": [
-        "AppImage",
-        "deb"
+        "AppImage"
       ]
     }
   },
