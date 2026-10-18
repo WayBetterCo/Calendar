@@ -84,10 +84,9 @@ export async function listEvents(input: ListEventsInput): Promise<CalendarEvent[
     )
   )
     .flat()
-    .filter((event) => matchesSearch(event, input.search, calendars))
-    .sort(sortEvents);
+    .filter((event) => matchesSearch(event, input.search, calendars));
 
-  return events;
+  return deduplicateSharedGoogleEvents(events, selectedCalendars).sort(sortEvents);
 }
 
 export async function createEvent(input: CreateEventInput): Promise<CalendarEvent> {
@@ -168,6 +167,61 @@ function groupByProvider(calendars: CalendarSource[]): Partial<Record<'google' |
     }
     return groups;
   }, {});
+}
+
+/** One shared Google calendar can be visible through several selected accounts. */
+function deduplicateSharedGoogleEvents(events: CalendarEvent[], calendars: CalendarSource[]): CalendarEvent[] {
+  const sources = new Map(calendars.map((calendar) => [calendar.id, calendar]));
+  const result: CalendarEvent[] = [];
+  const positions = new Map<string, number>();
+  for (const event of events) {
+    const source = sources.get(event.calendarId);
+    const encodedCalendarId = source?.id.split('::')[2];
+    if (event.provider !== 'google' || source?.provider !== 'google' || !encodedCalendarId || !event.providerEventId) {
+      result.push(event);
+      continue;
+    }
+    let providerCalendarId: string;
+    try {
+      providerCalendarId = decodeURIComponent(encodedCalendarId);
+    } catch {
+      // Unknown IDs must not cause unrelated events to disappear.
+      result.push(event);
+      continue;
+    }
+    const key = JSON.stringify([providerCalendarId, event.providerEventId]);
+    const position = positions.get(key);
+    if (position === undefined) {
+      positions.set(key, result.length);
+      result.push(event);
+    } else if (preferGoogleEvent(event, result[position], sources)) {
+      // Preserve the chosen account's original calendar ID for permission checks and CRUD.
+      result[position] = event;
+    }
+  }
+  return result;
+}
+
+function preferGoogleEvent(candidate: CalendarEvent, existing: CalendarEvent, sources: Map<string, CalendarSource>): boolean {
+  const candidateWritable = sources.get(candidate.calendarId)?.canWrite === true;
+  const existingWritable = sources.get(existing.calendarId)?.canWrite === true;
+  if (candidateWritable !== existingWritable) return candidateWritable;
+  const candidateDetails = eventDetailRank(candidate);
+  const existingDetails = eventDetailRank(existing);
+  for (let index = 0; index < candidateDetails.length; index++) {
+    if (candidateDetails[index] !== existingDetails[index]) return candidateDetails[index] > existingDetails[index];
+  }
+  // Account enumeration order can change between refreshes; equal views choose consistently.
+  return candidate.calendarId < existing.calendarId;
+}
+
+function eventDetailRank(event: CalendarEvent): number[] {
+  const hasTitle = Boolean(event.title.trim() && event.title !== 'Untitled event');
+  const details = [
+    event.description, event.location, event.video?.url, event.sourceUrl,
+    ...(event.attendees ?? []).flatMap((attendee) => [attendee.email, attendee.name, attendee.responseStatus]),
+  ].filter((value): value is string => Boolean(value?.trim()));
+  return [Number(hasTitle), details.length, details.reduce((length, value) => length + value.length, 0)];
 }
 
 function inRange(event: CalendarEvent, input: ListEventsInput): boolean {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CalendarAccount, CalendarSource, CreateEventInput } from '../../src/shared/calendar';
+import type { CalendarAccount, CalendarEvent, CalendarSource, CreateEventInput } from '../../src/shared/calendar';
 
 const system = vi.hoisted(() => ({ userData: '', secure: true, openExternal: vi.fn() }));
 vi.mock('electron', () => ({
@@ -163,6 +163,85 @@ describe('provider calendar responses', () => {
     await Promise.all([googleCalendarService.listCalendars(), googleCalendarService.listCalendars()]);
     expect(fetch.mock.calls.filter(([url]) => url.includes('/token'))).toHaveLength(1);
     expect(getTokens(account('google').id)?.refreshToken).toBe('rotated-refresh');
+  });
+});
+
+describe('shared Google calendar events across selected accounts', () => {
+  const source = (name: string, canWrite = true, rawId = 'shared@example.com'): CalendarSource => ({
+    ...calendar('google'), id: `google::google:${name}@example.com::${encodeURIComponent(rawId)}`,
+    accountId: `google:${name}@example.com`, name, canWrite,
+  });
+  const event = (calendar: CalendarSource, overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
+    id: 'same-event', providerEventId: 'same-event', provider: calendar.provider, calendarId: calendar.id,
+    title: 'Untitled event', startsAt: '2026-10-17T17:00:00.000Z', endsAt: '2026-10-17T18:00:00.000Z',
+    isAllDay: false, ...overrides,
+  });
+  function providers(calendars: CalendarSource[], events: CalendarEvent[]): void {
+    saveAccount(account('google'), tokens('google'));
+    vi.spyOn(googleCalendarService, 'listCalendars').mockResolvedValue(calendars.filter((item) => item.provider === 'google'));
+    vi.spyOn(microsoftCalendarService, 'listCalendars').mockResolvedValue(calendars.filter((item) => item.provider === 'microsoft'));
+    for (const service of [googleCalendarService, microsoftCalendarService]) {
+      vi.spyOn(service, 'listEvents').mockImplementation(async (_input, selected) => {
+        const ids = new Set(selected.map((item) => item.id));
+        return events.filter((item) => ids.has(item.calendarId));
+      });
+    }
+  }
+
+  it('shows the same shared calendar event once while keeping both source aliases', async () => {
+    const a = source('a'); const b = source('b');
+    providers([a, b], [event(a), event(b)]);
+    expect(await listCalendars()).toHaveLength(2);
+    const events = await listEvents({ ...range, calendarIds: [a.id, b.id] });
+    expect(events).toHaveLength(1);
+    expect(events[0].calendarId).toBe(a.id);
+  });
+
+  it('prefers a selected writable source and retains its original ID for editing', async () => {
+    const reader = source('reader', false); const writer = source('writer');
+    providers([reader, writer], [event(reader, { title: 'Reader details', description: 'Extra detail' }), event(writer)]);
+    const [chosen] = await listEvents({ ...range, calendarIds: [reader.id, writer.id] });
+    expect(chosen.calendarId).toBe(writer.id);
+    const update = vi.spyOn(googleCalendarService, 'updateEvent').mockResolvedValue(chosen);
+    await updateEvent({ id: chosen.id, calendarId: chosen.calendarId, title: 'Changed' });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ calendarId: writer.id }), writer);
+  });
+
+  it('uses richer details at equal permissions and is stable when source order changes', async () => {
+    const a = source('a', false); const b = source('b', false);
+    providers([a, b], [event(a), event(b, { title: 'Actual meeting', description: 'Agenda', attendees: [{ email: 'guest@example.com' }] })]);
+    const input = { ...range, calendarIds: [a.id, b.id] };
+    expect((await listEvents(input))[0].calendarId).toBe(b.id);
+    vi.mocked(googleCalendarService.listCalendars).mockResolvedValue([b, a]);
+    expect((await listEvents(input))[0].calendarId).toBe(b.id);
+    vi.mocked(googleCalendarService.listEvents).mockResolvedValue([event(b), event(a)]);
+    expect((await listEvents(input))[0].calendarId).toBe(a.id);
+  });
+
+  it('never substitutes an unselected writable account for the selected reader', async () => {
+    const reader = source('reader', false); const writer = source('writer');
+    providers([reader, writer], [event(reader), event(writer, { title: 'Private details' })]);
+    const events = await listEvents({ ...range, calendarIds: [reader.id] });
+    expect(events).toEqual([event(reader)]);
+    expect(googleCalendarService.listEvents).toHaveBeenCalledWith(expect.anything(), [reader]);
+  });
+
+  it('keeps matching IDs and titles on genuinely different calendars and providers', async () => {
+    const a = source('a', true, 'first@example.com');
+    const b = source('b', true, 'second@example.com');
+    const graph = calendar('microsoft');
+    providers([a, b, graph], [event(a), event(b), event(graph)]);
+    expect(await listEvents({ ...range, calendarIds: [a.id, b.id, graph.id] })).toHaveLength(3);
+  });
+
+  it('preserves separate recurring instances on a shared calendar', async () => {
+    const a = source('a'); const b = source('b');
+    const instances = [
+      event(a, { id: 'series_20261017', providerEventId: 'series_20261017' }),
+      event(a, { id: 'series_20261018', providerEventId: 'series_20261018', startsAt: '2026-10-18T17:00:00.000Z', endsAt: '2026-10-18T18:00:00.000Z' }),
+    ];
+    providers([a, b], [...instances, ...instances.map((item) => ({ ...item, calendarId: b.id }))]);
+    expect((await listEvents({ ...range, calendarIds: [a.id, b.id] })).map((item) => item.providerEventId)).toEqual(['series_20261017', 'series_20261018']);
   });
 });
 
