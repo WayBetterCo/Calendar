@@ -2,7 +2,9 @@
 
 Provider OAuth and API requests run in the Electron main process. Use Settings to connect accounts, choose visible calendars, or disconnect an account. Local events work without OAuth.
 
-Local credentials belong in an ignored `.env` file. Installed apps also read configuration from their user data directory, which remains `~/Library/Application Support/Dayline` on macOS. Existing `DAYLINE_*` variable names remain compatibility aliases. Public releases package only Google, Microsoft, and Teams client IDs and redirect ports from `resources/release.env` or process environment overrides; they do not read your local `.env` during packaging.
+Local credentials belong in an ignored `.env` file. Installed apps also read configuration from their user data directory, which remains `~/Library/Application Support/Dayline` on macOS. Existing `DAYLINE_*` variable names remain compatibility aliases. Public releases package Google, Microsoft, and Teams client IDs and redirect ports from `resources/release.env` or process environment overrides, plus explicitly supplied Google Desktop credentials as described below. Packaging never reads local `.env` files.
+
+An explicit `WAYBETTER_USER_DATA_DIR` isolates that profile from legacy, executable-directory, and working-directory environment files. It reads its own `.env`, packaged configuration, and any explicit `WAYBETTER_ENV_FILE` or `DAYLINE_ENV_FILE` paths.
 
 ## Google Calendar and Meet
 
@@ -13,7 +15,18 @@ WAYBETTER_GOOGLE_CLIENT_ID=your-desktop-client-id.apps.googleusercontent.com
 WAYBETTER_GOOGLE_REDIRECT_PORT=53682
 ```
 
-The system browser returns to `http://localhost:53682/oauth/google/callback`. Desktop clients support loopback redirects; use the Desktop registration rather than adding this callback to a Web application registration. The app uses PKCE. `WAYBETTER_GOOGLE_CLIENT_SECRET` is an optional compatibility setting for private local development and is never packaged.
+The system browser returns to `http://localhost:53682/oauth/google/callback`. Desktop clients support loopback redirects; use the Desktop registration rather than adding this callback to a Web application registration. The app uses PKCE. Some Desktop clients, including the configured WayBetter Desktop client, also require their issued `client_secret` for code exchange and refresh. Google explicitly treats installed-app client secrets as nonconfidential and permits embedding them. See [Google's installed application guidance](https://developers.google.com/identity/protocols/oauth2/#installed).
+
+For distributable builds, provide the Google Cloud Desktop credentials JSON in the packaging process environment:
+
+```sh
+export WAYBETTER_GOOGLE_DESKTOP_CREDENTIALS='{"installed":{"client_id":"your-desktop-client-id.apps.googleusercontent.com","client_secret":"your-desktop-client-value"}}'
+npm run package
+```
+
+Packaging accepts the `installed` Desktop form only, rejects a Web application credential object, and requires the JSON client ID to match the effective `WAYBETTER_GOOGLE_CLIENT_ID`. It copies only the validated Desktop credential fields. In GitHub Actions, store this JSON as the `GOOGLE_DESKTOP_OAUTH_JSON` repository secret; tag releases with a configured Google client ID require it. Do not commit the JSON or place it in `resources/release.env`.
+
+`WAYBETTER_GOOGLE_CLIENT_SECRET` remains a local runtime compatibility setting and is never copied from a developer's environment into a release. A local installed build can read it from the existing app support `.env`; a clean distributable needs the explicit Desktop JSON during packaging. This exception does not apply to confidential Web application credentials, Zoom secrets, access tokens, or refresh tokens.
 
 Requested scopes are `openid`, `email`, `profile`, `https://www.googleapis.com/auth/calendar.calendarlist.readonly`, and `https://www.googleapis.com/auth/calendar.events`.
 
@@ -71,6 +84,6 @@ For each configured provider:
 4. Restart the app and confirm the connection remains usable. Recheck after access-token expiry to exercise refresh.
 5. For meeting providers, create a disposable event with a meeting link and confirm the link belongs to the intended account.
 
-If Google returns `redirect_uri_mismatch` or requests a confidential client secret, check the client type and callback configuration. If consent is blocked, check the app's publishing audience and approved test users. If saved credentials cannot be unlocked, unlock the system keychain or reconnect from Settings. Never include tokens or secrets in a bug report.
+If Google returns `redirect_uri_mismatch`, check the Desktop client type and callback configuration. If it reports `client_secret is missing`, verify the matching Desktop JSON was supplied when packaging, or the local installed app has its runtime configuration. If consent is blocked, check the app's publishing audience, verification status, and approved test users. Moving the audience to Production does not remove warnings or limits that apply to an unverified app. If saved credentials cannot be unlocked, unlock the system keychain or reconnect from Settings. Never include tokens or credentials in a bug report.
 
 Apple Calendar and generic CalDAV are not connected providers in this version.

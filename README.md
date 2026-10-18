@@ -46,7 +46,9 @@ npm run dist:win       # Windows x64, on Windows
 npm run dist:linux     # Linux x64, on Linux
 ```
 
-Every packaging command regenerates `resources/.env` through the `beforePack` hook. Only allowlisted public Google, Microsoft, and Teams client IDs and redirect ports are included. Defaults come from `resources/release.env`, with process environment overrides. Your local `.env` and client secrets never enter the release configuration.
+Every packaging command regenerates `resources/.env` through the `beforePack` hook. Public Google, Microsoft, and Teams client IDs and redirect ports come from `resources/release.env`, with process environment overrides. Local `.env` files and private provider secrets are excluded.
+
+Google Desktop credentials have one explicit exception: some Desktop clients, including the configured WayBetter Desktop client, require the issued `client_secret` during token exchange even with PKCE. Google treats this installed-app value as nonconfidential and permits embedding it. Supply `WAYBETTER_GOOGLE_DESKTOP_CREDENTIALS` in the packaging process environment as JSON shaped like `{"installed":{"client_id":"...","client_secret":"..."}}`. Packaging accepts only the Desktop `installed` form and requires its client ID to match the effective public Google client ID. Generic `WAYBETTER_GOOGLE_CLIENT_SECRET` and Zoom secrets remain excluded. See [Google's installed application guidance](https://developers.google.com/identity/protocols/oauth2/#installed) and [Calendar Connections](CALENDAR_CONNECTIONS.md).
 
 ## Releases
 
@@ -58,7 +60,7 @@ Optionally set these repository secrets for signed, notarized Mac distribution:
 - `MAC_CSC_KEY_PASSWORD`: certificate password.
 - `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`: Apple notarization credentials.
 
-Optional Windows signing uses `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. Public provider client IDs and redirect ports can be repository variables named as in `.env.example`; Google, Microsoft, and Teams are supported by the release workflow. Zoom uses your own local credentials only.
+Optional Windows signing uses `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. Public provider client IDs and redirect ports can be repository variables named as in `.env.example`; Google, Microsoft, and Teams are supported by the release workflow. Store the Google Desktop credentials JSON in the `GOOGLE_DESKTOP_OAUTH_JSON` repository secret; the workflow passes it to the packaging environment and requires it for tag releases with a configured Google client ID. Keep this JSON out of git. Zoom uses your own local credentials only.
 
 Tag builds publish a normal latest release even when signing is unconfigured. Release notes identify unsigned Mac artifacts as unknown developer builds without Apple notarization. When Mac signing and notarization credentials are configured, the workflow also verifies the signature, Gatekeeper assessment, and stapled notarization ticket. See [electron-builder's Mac distribution documentation](https://www.electron.build/v26/docs/mac/).
 

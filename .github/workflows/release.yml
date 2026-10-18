@@ -37,6 +37,7 @@ jobs:
       - name: Build distributables
         run: ${{ matrix.command }}
         env:
+          WAYBETTER_GOOGLE_DESKTOP_CREDENTIALS: ${{ secrets.GOOGLE_DESKTOP_OAUTH_JSON }}
           WAYBETTER_GOOGLE_CLIENT_ID: ${{ vars.WAYBETTER_GOOGLE_CLIENT_ID || secrets.WAYBETTER_GOOGLE_CLIENT_ID }}
           WAYBETTER_GOOGLE_REDIRECT_PORT: ${{ vars.WAYBETTER_GOOGLE_REDIRECT_PORT || '53682' }}
           WAYBETTER_MICROSOFT_CLIENT_ID: ${{ vars.WAYBETTER_MICROSOFT_CLIENT_ID || secrets.WAYBETTER_MICROSOFT_CLIENT_ID }}

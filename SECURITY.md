@@ -2,7 +2,7 @@
 
 ## Credentials and local data
 
-Never commit OAuth client secrets, access or refresh tokens, API keys, signing certificates, certificate passwords, or private keys. Public OAuth client IDs and redirect ports may be committed in `resources/release.env`. Use an ignored local `.env` for private provider configuration and repository secrets for release signing.
+Never commit credential JSON files, OAuth client secret values, access or refresh tokens, API keys, signing certificates, certificate passwords, or private keys. Public OAuth client IDs and redirect ports may be committed in `resources/release.env`. Use an ignored local `.env` for private provider configuration and repository secrets for release credentials.
 
 Provider authentication and tokens stay in the Electron main process. New token writes require Electron `safeStorage` encryption; the app reports a keychain error instead of falling back to plaintext. Older unmarked token records remain readable for compatibility. JSON stores are replaced atomically and written with owner-only permissions. On macOS, accounts, settings, local events, and private configuration remain under `~/Library/Application Support/Dayline` across reinstallations.
 
@@ -11,6 +11,8 @@ The renderer uses a limited preload API. External links are validated before ope
 ## Release configuration
 
 The packaging hook regenerates `resources/.env` using an allowlist of public Google, Microsoft, and Teams client IDs and redirect ports. Local `.env` files do not participate. Packaging includes only the selected application files and icons, not the entire resources directory. Zoom requires local private configuration and is excluded from generated release configuration.
+
+The sole client-secret packaging exception is the nonconfidential value issued for a Google **Desktop app** client. [Google's installed application guidance](https://developers.google.com/identity/protocols/oauth2/#installed) permits embedding this value. The packaging process accepts it only through `WAYBETTER_GOOGLE_DESKTOP_CREDENTIALS` as an `installed` JSON object whose client ID matches the effective public Google client ID. Web application credentials and mismatched IDs are rejected. The release workflow receives this value from the `GOOGLE_DESKTOP_OAUTH_JSON` repository secret and requires it for tag releases configured with Google. Keep the JSON out of git and logs even though its selected Desktop values are intentionally embedded in the application. Generic `WAYBETTER_GOOGLE_CLIENT_SECRET`, Zoom secrets, and user tokens remain excluded from release inputs.
 
 Tag builds publish normal latest releases, including unknown developer Mac builds when signing is unconfigured. The release notes identify unsigned Mac artifacts and their lack of Apple notarization; macOS Gatekeeper may warn about or block them.
 

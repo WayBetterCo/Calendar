@@ -23,8 +23,26 @@ export function releaseEnvironment(environment, defaults = {}) {
     }
     entries.push([`${prefix}_REDIRECT_PORT`, port]);
   }
+  const desktopJson = environment.WAYBETTER_GOOGLE_DESKTOP_CREDENTIALS;
+  if (desktopJson) {
+    let credentials;
+    try { credentials = JSON.parse(desktopJson); } catch { throw new Error('Google Desktop credentials must be valid installed-app JSON.'); }
+    const installed = credentials?.installed;
+    if (credentials?.web || !installed || typeof installed.client_id !== 'string' || !installed.client_id.trim() || typeof installed.client_secret !== 'string' || !installed.client_secret.trim()) {
+      throw new Error('Only Google installed/Desktop OAuth credentials may be packaged. Web credentials must stay server-side.');
+    }
+    const configuredId = entries.find(([key]) => key === 'WAYBETTER_GOOGLE_CLIENT_ID')?.[1];
+    if (configuredId && installed.client_id !== configuredId) throw new Error('Google Desktop credentials do not match the release client ID.');
+    if (/[\r\n\x00]/.test(installed.client_id + installed.client_secret)) throw new Error('Google Desktop credentials contain invalid characters.');
+    if (!configuredId) entries.push(['WAYBETTER_GOOGLE_CLIENT_ID', installed.client_id]);
+    // Google expressly treats installed-app client secrets as non-confidential
+    // app identity, distributable with the client. Never accept Web secrets here.
+    entries.push(['WAYBETTER_GOOGLE_CLIENT_SECRET', installed.client_secret]);
+  } else if (environment.GITHUB_REF?.startsWith('refs/tags/v') && entries.some(([key]) => key === 'WAYBETTER_GOOGLE_CLIENT_ID')) {
+    throw new Error('Google-enabled releases require the GOOGLE_DESKTOP_OAUTH_JSON repository secret.');
+  }
   return [
-    '# Generated during packaging. Public OAuth configuration only.',
+    '# Generated during packaging. Public OAuth app identity only; no account tokens.',
     ...entries.map(([key, value]) => `${key}=${JSON.stringify(value)}`),
     '',
   ].join('\n');
