@@ -2,6 +2,8 @@
 
 A compact Electron desktop calendar with local events, Google Calendar and Microsoft 365 sync, and Google Meet, Zoom, and Microsoft Teams meeting links. You can use the local calendar without a provider account.
 
+Agenda meeting buttons use the same colored provider logos as Settings. Events with a physical location show a map pin that opens Google Maps; events with both a location and a video link show both actions.
+
 ## Run locally
 
 Use Node.js 24 LTS, matching `.nvmrc`:

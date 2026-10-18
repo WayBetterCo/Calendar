@@ -4,6 +4,7 @@ import { getEventSubtitle } from '../../lib/events';
 import { cn } from '../../lib/cn';
 import { CalendarColorDot } from './CalendarColorDot';
 import { JoinButton } from './JoinButton';
+import { LocationButton } from './LocationButton';
 
 type EventRowProps = {
   event: CalendarEvent;
@@ -30,6 +31,7 @@ export function EventRow({ event, calendar, timeFormat, now, isCurrent, isNext, 
         {subtitle ? <div className="event-subtitle">{subtitle}</div> : null}
       </div>
       <div className="event-actions">
+        <LocationButton event={event} />
         {event.video ? <JoinButton event={event} video={event.video} /> : null}
       </div>
     </div>

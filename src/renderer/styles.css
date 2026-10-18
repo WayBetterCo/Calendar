@@ -602,8 +602,11 @@ textarea:focus-visible {
 }
 
 .event-row-complete {
-  opacity: 0.48;
   background: hsl(var(--muted) / 0.38);
+}
+
+.event-row-complete > :is(.calendar-dot, .event-time, .event-copy) {
+  opacity: 0.48;
 }
 
 .event-row-current {
@@ -696,7 +699,8 @@ textarea:focus-visible {
   min-width: max-content;
 }
 
-.join-button {
+.join-button,
+.location-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -711,18 +715,16 @@ textarea:focus-visible {
   border-radius: 8px;
 }
 
-.join-button:hover {
+.join-button:hover,
+.location-button:hover {
   background: hsl(var(--primary) / 0.16);
 }
 
 .meeting-provider-icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
   object-fit: contain;
-}
-
-:root[data-theme='dark'] .meeting-provider-icon {
-  filter: brightness(0) invert(1);
 }
 
 .empty-day {

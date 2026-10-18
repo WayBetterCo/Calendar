@@ -1,3 +1,4 @@
+import { Video } from 'lucide-react';
 import type { CalendarEvent, VideoConference } from '../../types/calendar';
 import { calendarApi } from '../../api/calendarApi';
 import meetIcon from '../../assets/icons/google-meet.svg';
@@ -20,7 +21,7 @@ export function JoinButton({ event, video }: JoinButtonProps): React.JSX.Element
       title={`Join ${video.label}`}
       onClick={() => void calendarApi.openExternal(video.url)}
     >
-      {icon ? <img className="meeting-provider-icon" src={icon} alt="" aria-hidden="true" /> : null}
+      {icon ? <img className="meeting-provider-icon" src={icon} alt="" aria-hidden="true" /> : <Video className="meeting-provider-icon" aria-hidden="true" />}
     </button>
   );
 }
