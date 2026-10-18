@@ -61,6 +61,8 @@ Zoom secrets are never packaged. Do not add a shared Zoom secret to public build
 
 Automated tests and the packaged smoke test use isolated local data and controlled provider responses. They cannot confirm a provider's registration, consent screen, tenant policy, or live account permissions.
 
+Unknown developer Mac releases use the same provider registrations and consent flows as signed releases. Release signing does not establish a live provider connection.
+
 For each configured provider:
 
 1. Open the installed app and connect the account from Settings through the system browser.

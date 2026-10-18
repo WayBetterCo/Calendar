@@ -26,7 +26,7 @@ open "/Applications/WayBetter Calendar.app"
 
 The installer checks the project, builds for this Mac's architecture, stages and verifies the app, and then replaces the installation. A failed replacement restores the previous app. Existing accounts, local events, and settings stay in `~/Library/Application Support/Dayline` to preserve compatibility with earlier versions. Local `.env` configuration is copied there only if no configuration already exists.
 
-This local build uses an ad hoc signature. Downloadable Mac releases need Developer ID signing and Apple notarization for normal Gatekeeper acceptance.
+This local build uses an ad hoc signature. Mac releases can also be published as unknown developer builds without Developer ID signing or Apple notarization. macOS Gatekeeper may warn about or block these downloads.
 
 ## Validate and package
 
@@ -52,7 +52,7 @@ Every packaging command regenerates `resources/.env` through the `beforePack` ho
 
 Validation runs on pull requests, pushes to `main` and `codex/**`, and manual dispatch. It checks the code and launches packaged Mac and Windows apps. The release workflow runs on `v*` tags or manual dispatch; a tag must match `package.json`, for example `v1.1.0`. Manual runs build artifacts; tag runs also create the GitHub release. Release artifacts include the version, platform, architecture, and SHA-256 checksums.
 
-Set these repository secrets for signed, notarized Mac distribution:
+Optionally set these repository secrets for signed, notarized Mac distribution:
 
 - `MAC_CSC_LINK`: Developer ID Application certificate as a supported electron-builder certificate link or base64 value.
 - `MAC_CSC_KEY_PASSWORD`: certificate password.
@@ -60,7 +60,7 @@ Set these repository secrets for signed, notarized Mac distribution:
 
 Optional Windows signing uses `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. Public provider client IDs and redirect ports can be repository variables named as in `.env.example`; Google, Microsoft, and Teams are supported by the release workflow. Zoom uses your own local credentials only.
 
-Without the Mac signing and notarization configuration, release assets remain in a draft for review. Successful compilation alone does not make an unsigned build ready for public distribution. See [electron-builder's Mac distribution documentation](https://www.electron.build/v26/docs/mac/).
+Tag builds publish a normal latest release even when signing is unconfigured. Release notes identify unsigned Mac artifacts as unknown developer builds without Apple notarization. When Mac signing and notarization credentials are configured, the workflow also verifies the signature, Gatekeeper assessment, and stapled notarization ticket. See [electron-builder's Mac distribution documentation](https://www.electron.build/v26/docs/mac/).
 
 Updates are installed manually from [GitHub Releases](https://github.com/WayBetterCo/Calendar/releases). The app does not automatically download or install updates.
 

@@ -12,6 +12,8 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    env:
+      MAC_SIGNING_READY: ${{ secrets.MAC_CSC_LINK != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +53,7 @@ jobs:
       - name: Verify packaged startup and local event lifecycle
         run: npm run smoke:packaged
       - name: Verify signed Mac distribution
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.MAC_SIGNING_READY == 'true'
         shell: bash
         run: node scripts/verify-mac-release.mjs
         env:
@@ -83,10 +85,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         env:
           MAC_SIGNING_READY: ${{ secrets.MAC_CSC_LINK != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+          MAC_CERTIFICATE_CONFIGURED: ${{ secrets.MAC_CSC_LINK != '' }}
         with:
           generate_release_notes: true
-          # Unsigned builds remain reviewable drafts until distribution is configured.
-          draft: ${{ env.MAC_SIGNING_READY != 'true' }}
-          make_latest: ${{ env.MAC_SIGNING_READY == 'true' && 'true' || 'false' }}
+          body: |
+            ${{ env.MAC_SIGNING_READY == 'true' && 'macOS artifacts are Developer ID signed and Apple notarized.' || env.MAC_CERTIFICATE_CONFIGURED == 'true' && 'macOS artifacts use a configured signing certificate, but Apple notarization has not been verified. These unknown developer builds may trigger macOS Gatekeeper warnings.' || 'macOS artifacts are unsigned by an identified developer and are not Apple notarized. These unknown developer builds may trigger macOS Gatekeeper warnings.' }}
+          draft: false
+          make_latest: true
           files: release-assets/*
           fail_on_unmatched_files: true

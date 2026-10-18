@@ -12,7 +12,9 @@ The renderer uses a limited preload API. External links are validated before ope
 
 The packaging hook regenerates `resources/.env` using an allowlist of public Google, Microsoft, and Teams client IDs and redirect ports. Local `.env` files do not participate. Packaging includes only the selected application files and icons, not the entire resources directory. Zoom requires local private configuration and is excluded from generated release configuration.
 
-Mac public distribution requires Developer ID signing and notarization. The workflow reads `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` from repository secrets. Optional Windows signing uses `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. When Mac signing is unconfigured, tag builds create draft releases. Signed Mac builds must pass signature, Gatekeeper, and stapled notarization checks.
+Tag builds publish normal latest releases, including unknown developer Mac builds when signing is unconfigured. The release notes identify unsigned Mac artifacts and their lack of Apple notarization; macOS Gatekeeper may warn about or block them.
+
+Optional Mac signing reads `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` from repository secrets. With signing and notarization configured, Mac builds must pass signature, Gatekeeper, and stapled notarization checks. Optional Windows signing uses `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
 
 Before releasing:
 

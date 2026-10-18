@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const dist = fileURLToPath(new URL('../dist', import.meta.url));
 if (process.env.WAYBETTER_REQUIRE_SIGNED_RELEASE !== 'true') {
-  console.log('No Developer ID credentials configured. These artifacts require manual review and remain a draft release.');
+  console.log('Developer ID verification skipped. These builds are distributed as an unknown developer without Apple notarization.');
   process.exit(0);
 }
 for (const directory of readdirSync(dist).filter((name) => /^mac(?:-|$)/.test(name))) {
