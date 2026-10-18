@@ -1,8 +1,9 @@
 import { cpSync, existsSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = fileURLToPath(new URL('..', import.meta.url));
 const appName = 'WayBetter Calendar';
 const electronDist = join(root, 'node_modules/electron/dist');
 const electronModulePath = join(root, 'node_modules/electron/path.txt');
@@ -44,7 +45,7 @@ function prepareDevElectron() {
   setPlistValue('CFBundleName', appName);
   setPlistValue('CFBundleDisplayName', appName);
   setPlistValue('CFBundleExecutable', 'Electron');
-  setPlistValue('CFBundleIdentifier', 'ai.dayline.app.dev');
+  setPlistValue('CFBundleIdentifier', 'com.waybetter.calendar.dev');
   setPlistValue('CFBundleIconFile', 'waybetter-calendar.icns');
 
   if (existsSync(appIcon) && existsSync(electronApp)) {

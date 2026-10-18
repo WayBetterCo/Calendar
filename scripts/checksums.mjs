@@ -1,0 +1,11 @@
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+const dist = fileURLToPath(new URL('../dist', import.meta.url));
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const files = readdirSync(dist).filter((name) => name.startsWith(`WayBetter-Calendar-${version}-`) && /\.(dmg|zip|exe|AppImage)$/.test(name)).sort();
+if (!files.length) throw new Error('No current-version release artifacts found.');
+const lines = files.map((name) => `${createHash('sha256').update(readFileSync(join(dist, name))).digest('hex')}  ${name}`);
+writeFileSync(join(dist, `${process.platform}-SHA256SUMS.txt`), `${lines.join('\n')}\n`);
+console.log(`Checksummed ${files.length} release artifacts.`);

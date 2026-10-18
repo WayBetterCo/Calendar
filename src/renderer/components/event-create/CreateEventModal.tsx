@@ -1,25 +1,14 @@
 import { format, parseISO } from 'date-fns';
 import { Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 import type { CalendarEvent, CalendarSource, CreatableVideoProvider, CreateEventInput } from '../../types/calendar';
 import { defaultDraftTimes } from '../../lib/dates';
+import { createEventFormSchema, preservesEventTiming } from '../../lib/eventDraft';
 import { cn } from '../../lib/cn';
 import meetIcon from '../../assets/icons/google-meet.svg';
 import teamsIcon from '../../assets/icons/microsoft-teams.svg';
 import zoomIcon from '../../assets/icons/zoom.svg';
-
-const createEventFormSchema = z.object({
-  title: z.string().trim().min(1, 'Title is required'),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startTime: z.string().regex(/^\d{2}:\d{2}$/),
-  endTime: z.string().regex(/^\d{2}:\d{2}$/),
-  calendarId: z.string().min(1),
-  addVideoCall: z.boolean(),
-  videoProvider: z.enum(['google_meet', 'zoom', 'teams']).optional(),
-  location: z.string(),
-  notes: z.string(),
-});
 
 const CREATE_DURATION_MINUTES = [15, 30, 45, 60] as const;
 const VIDEO_PROVIDER_OPTIONS = [
@@ -32,6 +21,7 @@ type CreateEventModalProps = {
   date: Date | null;
   calendars: CalendarSource[];
   defaultCalendarId: string;
+  defaultDurationMinutes?: number;
   mode?: 'create' | 'edit';
   event?: CalendarEvent | null;
   onClose: () => void;
@@ -43,6 +33,7 @@ export function CreateEventModal({
   date,
   calendars,
   defaultCalendarId,
+  defaultDurationMinutes = 30,
   mode = 'create',
   event,
   onClose,
@@ -56,7 +47,7 @@ export function CreateEventModal({
 
     return date;
   }, [date, event]);
-  const initialTimes = useMemo(() => (modalDate ? defaultDraftTimes(modalDate) : { startTime: '09:00', endTime: '09:30' }), [modalDate]);
+  const initialTimes = useMemo(() => (modalDate ? defaultDraftTimes(modalDate, defaultDurationMinutes) : { startTime: '09:00', endTime: '09:30' }), [modalDate, defaultDurationMinutes]);
   const [title, setTitle] = useState('');
   const [dateValue, setDateValue] = useState('');
   const [startTime, setStartTime] = useState(initialTimes.startTime);
@@ -73,8 +64,11 @@ export function CreateEventModal({
   const [isSubmitting, setSubmitting] = useState(false);
   const [isDeleting, setDeleting] = useState(false);
   const startTimeOptions = useMemo(() => createQuarterHourOptions(durationMinutes), [durationMinutes]);
+  const writableCalendars = calendars.filter((calendar) => calendar.canWrite !== false);
+  const isReadOnly = Boolean(event && calendars.find((calendar) => calendar.id === event.calendarId)?.canWrite === false);
+  const preserveTiming = Boolean(event && preservesEventTiming(event));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (event) {
       const startsAt = parseISO(event.startsAt);
       const endsAt = parseISO(event.endsAt);
@@ -95,13 +89,14 @@ export function CreateEventModal({
     }
 
     if (date) {
-      const nextTimes = defaultDraftTimes(date);
+      const nextDuration = nearestCreateDuration(defaultDurationMinutes);
+      const nextTimes = defaultDraftTimes(date, nextDuration);
       setTitle('');
       setDateValue(format(date, 'yyyy-MM-dd'));
       setStartTime(nextTimes.startTime);
       setEndTime(nextTimes.endTime);
-      setDurationMinutes(30);
-      setCalendarId(defaultCalendarId);
+      setDurationMinutes(nextDuration);
+      setCalendarId(writableCalendars.find((calendar) => calendar.id === defaultCalendarId)?.id ?? writableCalendars.find((calendar) => calendar.isPrimary)?.id ?? writableCalendars[0]?.id ?? '');
       setAddVideoCall(false);
       setVideoProvider('google_meet');
       setGuestEmails([]);
@@ -110,7 +105,7 @@ export function CreateEventModal({
       setNotes('');
       setError('');
     }
-  }, [date, defaultCalendarId, event]);
+  }, [date, defaultCalendarId, defaultDurationMinutes, event]);
 
   if (!modalDate) {
     return null;
@@ -118,6 +113,7 @@ export function CreateEventModal({
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (isSubmitting || isDeleting || isReadOnly) return;
     setError('');
     const submittedEndTime = isEditMode ? endTime : addMinutesToTime(startTime, durationMinutes);
 
@@ -138,15 +134,27 @@ export function CreateEventModal({
       return;
     }
 
+    if (!preserveTiming && parsed.data.endTime <= parsed.data.startTime) {
+      setError('End time must be after start time on the same day.');
+      return;
+    }
+
+    const guests = uniqueGuests([...guestEmails, ...parseGuestTokens(guestInput)]);
+    const invalidGuest = guests.find((email) => !z.email().safeParse(email).success);
+    if (invalidGuest) {
+      setError(`Enter a valid email address for ${invalidGuest}.`);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       await onSubmit({
         ...parsed.data,
         videoProvider: parsed.data.addVideoCall ? parsed.data.videoProvider : undefined,
-        guests: uniqueGuests([...guestEmails, ...parseGuestTokens(guestInput)]),
-        location: parsed.data.location || undefined,
-        notes: parsed.data.notes || undefined,
+        guests,
+        location: isEditMode ? parsed.data.location : parsed.data.location || undefined,
+        notes: isEditMode ? parsed.data.notes : parsed.data.notes || undefined,
       });
       onClose();
     } catch (submitError) {
@@ -193,7 +201,7 @@ export function CreateEventModal({
   }
 
   async function deleteEvent(): Promise<void> {
-    if (!event || !onDelete) {
+    if (!event || !onDelete || isSubmitting || isDeleting || isReadOnly) {
       return;
     }
 
@@ -243,7 +251,7 @@ export function CreateEventModal({
       <form className="create-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-header">
           <div>
-            <h2 id={titleId}>{isEditMode ? 'Edit event' : 'Create event'}</h2>
+            <h2 id={titleId}>{isReadOnly ? 'Event details' : isEditMode ? 'Edit event' : 'Create event'}</h2>
             <p>{format(modalDate, 'EEEE, MMMM d')}</p>
           </div>
           <button type="button" className="icon-button" aria-label={isEditMode ? 'Close edit event' : 'Close create event'} onClick={onClose}>
@@ -251,125 +259,138 @@ export function CreateEventModal({
           </button>
         </div>
 
-        <label className="field-label">
-          Title
-          <input autoFocus={!isEditMode} value={title} onChange={(event) => setTitle(event.currentTarget.value)} placeholder="Event title" />
-        </label>
+        {isReadOnly ? <p className="settings-help">This calendar is read-only. You can view this event here.</p> : null}
+        {!isEditMode && !writableCalendars.length ? <p className="form-error">Connect a writable calendar in Settings to create events.</p> : null}
+        <fieldset className="event-fields" disabled={isReadOnly || isSubmitting || isDeleting}>
+          <label className="field-label">
+            Title
+            <input autoFocus={!isEditMode} value={title} onChange={(event) => setTitle(event.currentTarget.value)} placeholder="Event title" />
+          </label>
 
-        <label className="field-label">
-          Date
-          <input type="date" value={dateValue} onChange={(event) => setDateValue(event.currentTarget.value)} />
-        </label>
+          <label className="field-label">
+            Date
+            <input type="date" value={dateValue} disabled={preserveTiming} onChange={(event) => setDateValue(event.currentTarget.value)} />
+            {preserveTiming && event ? <span className="field-help">{event.isAllDay ? 'All-day event' : 'Multi-day event'} through {format(new Date(parseISO(event.endsAt).getTime() - (event.isAllDay ? 1 : 0)), 'MMM d')}. Edit dates in your calendar provider.</span> : null}
+          </label>
 
-        {isEditMode ? (
-          <div className="form-grid">
-            <label className="field-label">
-              Start
-              <input type="time" step={900} value={startTime} onChange={(event) => setStartTime(event.currentTarget.value)} />
-            </label>
-            <label className="field-label">
-              End
-              <input type="time" step={900} value={endTime} onChange={(event) => setEndTime(event.currentTarget.value)} />
-            </label>
-          </div>
-        ) : (
-          <div className="form-grid">
-            <label className="field-label">
-              Start
-              <select value={startTime} onChange={(event) => setStartTime(event.currentTarget.value)}>
-                {startTimeOptions.map((time) => (
-                  <option key={time} value={time}>
-                    {formatTimeOption(time)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field-label">
-              Duration
-              <select value={durationMinutes} onChange={(event) => changeDuration(Number(event.currentTarget.value) as (typeof CREATE_DURATION_MINUTES)[number])}>
-                {CREATE_DURATION_MINUTES.map((duration) => (
-                  <option key={duration} value={duration}>
-                    {duration} min
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
+          {isEditMode ? (
+            <div className="form-grid">
+              <label className="field-label">
+                Start
+                <input type="time" step={60} disabled={preserveTiming} value={startTime} onChange={(event) => setStartTime(event.currentTarget.value)} />
+              </label>
+              <label className="field-label">
+                End
+                <input type="time" step={60} disabled={preserveTiming} value={endTime} onChange={(event) => setEndTime(event.currentTarget.value)} />
+              </label>
+            </div>
+          ) : (
+            <div className="form-grid">
+              <label className="field-label">
+                Start
+                <select value={startTime} onChange={(event) => setStartTime(event.currentTarget.value)}>
+                  {startTimeOptions.map((time) => (
+                    <option key={time} value={time}>
+                      {formatTimeOption(time)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-label">
+                Duration
+                <select value={durationMinutes} onChange={(event) => changeDuration(Number(event.currentTarget.value) as (typeof CREATE_DURATION_MINUTES)[number])}>
+                  {CREATE_DURATION_MINUTES.map((duration) => (
+                    <option key={duration} value={duration}>
+                      {duration} min
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
 
-        <label className="field-label">
-          Calendar
-          <select value={calendarId} onChange={(event) => setCalendarId(event.currentTarget.value)} disabled={isEditMode}>
-            {calendars.map((calendar) => (
-              <option key={calendar.id} value={calendar.id}>
-                {calendar.name}
-              </option>
-            ))}
-          </select>
-          {isEditMode ? <span className="field-help">Moving between calendars is coming next.</span> : null}
-        </label>
+          <label className="field-label">
+            Calendar
+            <select value={calendarId} onChange={(event) => {
+              const nextId = event.currentTarget.value;
+              setCalendarId(nextId);
+              if (!nextId.includes('::')) setAddVideoCall(false);
+            }} disabled={isEditMode}>
+              {(isEditMode ? calendars : writableCalendars).map((calendar) => (
+                <option key={calendar.id} value={calendar.id}>
+                  {calendar.name}
+                </option>
+              ))}
+            </select>
+            {isEditMode ? <span className="field-help">Moving between calendars is coming next.</span> : null}
+          </label>
 
-        {!isEditMode ? (
+          {!isEditMode ? (
+            <div className="field-label">
+              <span>Video</span>
+              <div className="video-provider-picker" role="group" aria-label="Choose video provider">
+                {VIDEO_PROVIDER_OPTIONS.map((option) => {
+                  const selected = addVideoCall && videoProvider === option.provider;
+                  return (
+                    <button
+                      key={option.provider}
+                      type="button"
+                      className={cn('video-provider-button', selected && 'selected')}
+                      aria-pressed={selected}
+                      aria-label={`${selected ? 'Remove' : 'Add'} ${option.label} video meeting`}
+                      title={option.label}
+                      disabled={!calendarId.includes('::')}
+                      onClick={() => toggleVideoProvider(option.provider)}
+                    >
+                      <img className="video-provider-icon" src={option.icon} alt="" aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+              {!calendarId.includes('::') ? <span className="field-help">Connect a calendar account to create video meetings. Local demo events stay on this device.</span> : null}
+            </div>
+          ) : null}
+
           <div className="field-label">
-            <span>Video</span>
-            <div className="video-provider-picker" role="group" aria-label="Choose video provider">
-              {VIDEO_PROVIDER_OPTIONS.map((option) => {
-                const selected = addVideoCall && videoProvider === option.provider;
-                return (
-                  <button
-                    key={option.provider}
-                    type="button"
-                    className={cn('video-provider-button', selected && 'selected')}
-                    aria-pressed={selected}
-                    aria-label={`${selected ? 'Remove' : 'Add'} ${option.label} video meeting`}
-                    title={option.label}
-                    onClick={() => toggleVideoProvider(option.provider)}
-                  >
-                    <img className="video-provider-icon" src={option.icon} alt="" aria-hidden="true" />
+            <span>Guests</span>
+            <div className="guest-token-field" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>
+              {guestEmails.map((email) => (
+                <span className="guest-chip" key={email}>
+                  <span className="guest-chip-label">{email}</span>
+                  <button type="button" className="guest-chip-remove" aria-label={`Remove ${email}`} onClick={() => removeGuest(email)}>
+                    <X size={12} />
                   </button>
-                );
-              })}
+                </span>
+              ))}
+              <input
+                className="guest-token-input"
+                aria-label="Guest email addresses"
+                value={guestInput}
+                onBlur={() => commitGuestInput()}
+                onChange={(event) => setGuestInput(event.currentTarget.value)}
+                onKeyDown={handleGuestKeyDown}
+                onPaste={handleGuestPaste}
+                placeholder={guestEmails.length ? 'Add guest' : 'name@example.com'}
+              />
             </div>
           </div>
-        ) : null}
 
-        <div className="field-label">
-          <span>Guests</span>
-          <div className="guest-token-field" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>
-            {guestEmails.map((email) => (
-              <span className="guest-chip" key={email}>
-                <span className="guest-chip-label">{email}</span>
-                <button type="button" className="guest-chip-remove" aria-label={`Remove ${email}`} onClick={() => removeGuest(email)}>
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
-            <input
-              className="guest-token-input"
-              value={guestInput}
-              onBlur={() => commitGuestInput()}
-              onChange={(event) => setGuestInput(event.currentTarget.value)}
-              onKeyDown={handleGuestKeyDown}
-              onPaste={handleGuestPaste}
-              placeholder={guestEmails.length ? 'Add guest' : 'name@example.com'}
-            />
-          </div>
-        </div>
+          <label className="field-label">
+            Location
+            <input value={location} onChange={(event) => setLocation(event.currentTarget.value)} placeholder="Room, address, or short note" />
+          </label>
 
-        <label className="field-label">
-          Location
-          <input value={location} onChange={(event) => setLocation(event.currentTarget.value)} placeholder="Room, address, or short note" />
-        </label>
+          <label className="field-label">
+            Notes
+            <textarea value={notes} onChange={(event) => setNotes(event.currentTarget.value)} rows={3} />
+          </label>
 
-        <label className="field-label">
-          Notes
-          <textarea value={notes} onChange={(event) => setNotes(event.currentTarget.value)} rows={3} />
-        </label>
+        </fieldset>
 
         {error ? <div className="form-error">{error}</div> : null}
 
         <div className="modal-actions modal-actions-split">
-          {isEditMode && onDelete ? (
+          {isEditMode && onDelete && !isReadOnly ? (
             <button type="button" className="danger-button" disabled={isDeleting || isSubmitting} onClick={deleteEvent}>
               <Trash2 size={14} />
               {isDeleting ? 'Deleting...' : 'Delete'}
@@ -381,9 +402,9 @@ export function CreateEventModal({
             <button type="button" className="secondary-button" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="primary-button" disabled={isSubmitting || isDeleting}>
+            {!isReadOnly ? <button type="submit" className="primary-button" disabled={isSubmitting || isDeleting || !calendarId}>
               {isSubmitting ? pendingLabel : submitLabel}
-            </button>
+            </button> : null}
           </div>
         </div>
       </form>

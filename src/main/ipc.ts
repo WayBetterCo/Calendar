@@ -1,5 +1,8 @@
-import { shell, ipcMain, nativeTheme } from 'electron';
+import { ipcMain, nativeTheme } from 'electron';
 import { z } from 'zod';
+import { openExternalWebUrl } from './externalUrl';
+import { createEventSchema, updateEventSchema, listEventsSchema, settingsPatchSchema } from './validation';
+import { applySystemSettings } from './settings/systemSettings';
 import { readSettings, writeSettings } from './settings/settingsStore';
 import {
   connectProvider,
@@ -17,31 +20,6 @@ import {
   getConnectedVideoAccounts,
 } from './video/videoMeetingService';
 
-const listEventsSchema = z.object({
-  startsAt: z.string().datetime(),
-  endsAt: z.string().datetime(),
-  calendarIds: z.array(z.string()).optional(),
-  search: z.string().optional(),
-});
-
-const createEventSchema = z.object({
-  title: z.string().trim().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startTime: z.string().regex(/^\d{2}:\d{2}$/),
-  endTime: z.string().regex(/^\d{2}:\d{2}$/),
-  calendarId: z.string().min(1),
-  addVideoCall: z.boolean(),
-  videoProvider: z.enum(['google_meet', 'zoom', 'teams']).optional(),
-  guests: z.array(z.string()).default([]),
-  location: z.string().optional(),
-  notes: z.string().optional(),
-});
-
-const updateEventSchema = createEventSchema.partial().extend({
-  id: z.string().min(1),
-  calendarId: z.string().min(1),
-});
-
 const deleteEventSchema = z.object({
   id: z.string().min(1),
   calendarId: z.string().min(1),
@@ -49,21 +27,6 @@ const deleteEventSchema = z.object({
 
 const providerSchema = z.enum(['google', 'microsoft']);
 const videoProviderSchema = z.enum(['google_meet', 'zoom', 'teams']);
-
-const settingsPatchSchema = z
-  .object({
-    defaultCalendarId: z.string().optional(),
-    defaultDurationMinutes: z.number().int().min(15).max(240).optional(),
-    startWeekOn: z.enum(['sunday', 'monday']).optional(),
-    timeFormat: z.enum(['12h', '24h']).optional(),
-    showWeather: z.boolean().optional(),
-    weatherUnit: z.enum(['fahrenheit', 'celsius']).optional(),
-    weatherLocation: z.string().optional(),
-    launchAtLogin: z.boolean().optional(),
-    keepWindowOnTop: z.boolean().optional(),
-    selectedCalendarIds: z.array(z.string()).optional(),
-  })
-  .partial();
 
 const weatherForecastSchema = z.object({
   latitude: z.number().min(-90).max(90),
@@ -84,13 +47,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('video:connect-provider', (_event, rawProvider) => connectVideoProvider(videoProviderSchema.parse(rawProvider)));
   ipcMain.handle('video:disconnect-account', (_event, rawAccountId: string) => disconnectVideoAccount(z.string().parse(rawAccountId)));
   ipcMain.handle('settings:get', () => readSettings());
-  ipcMain.handle('settings:update', (_event, rawPatch) => writeSettings(settingsPatchSchema.parse(rawPatch)));
+  ipcMain.handle('settings:update', (_event, rawPatch) => {
+    const patch = settingsPatchSchema.parse(rawPatch);
+    applySystemSettings({ ...readSettings(), ...patch }, patch.launchAtLogin !== undefined);
+    return writeSettings(patch);
+  });
   ipcMain.handle('weather:get-daily-forecast', async (_event, rawInput) => getDailyWeatherForecast(weatherForecastSchema.parse(rawInput)));
   ipcMain.handle('weather:resolve-location', async (_event, rawLocation) => resolveWeatherLocation(z.string().parse(rawLocation)));
   ipcMain.handle('theme:get', () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
   ipcMain.handle('shell:open-external', async (_event, rawUrl: string) => {
     const url = z.string().url().parse(rawUrl);
-    await shell.openExternal(url);
+    await openExternalWebUrl(url);
   });
 }
 
@@ -104,7 +71,7 @@ async function getDailyWeatherForecast(input: z.infer<typeof weatherForecastSche
     timezone: 'auto',
     temperature_unit: input.unit,
   });
-  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, { signal: AbortSignal.timeout(15000) });
 
   if (!response.ok) {
     throw new Error('Weather forecast is unavailable.');
@@ -141,7 +108,7 @@ async function resolveWeatherLocation(rawLocation: string) {
   const zipMatch = location.match(/^\d{5}(?:-\d{4})?$/);
   if (zipMatch) {
     const zip = zipMatch[0].slice(0, 5);
-    const response = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    const response = await fetch(`https://api.zippopotam.us/us/${zip}`, { signal: AbortSignal.timeout(15000) });
     if (!response.ok) {
       throw new Error('Weather location was not found.');
     }
@@ -175,7 +142,7 @@ async function resolveWeatherLocation(rawLocation: string) {
     language: 'en',
     format: 'json',
   });
-  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`);
+  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`, { signal: AbortSignal.timeout(15000) });
 
   if (!response.ok) {
     throw new Error('Weather location was not found.');

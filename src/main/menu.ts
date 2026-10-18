@@ -1,4 +1,5 @@
 import { Menu, app } from 'electron';
+import { openExternalWebUrl } from './externalUrl';
 
 const APP_NAME = 'WayBetter Calendar';
 
@@ -53,6 +54,13 @@ export function installApplicationMenu(): void {
           { role: 'zoomIn', label: 'Zoom In' },
           { role: 'zoomOut', label: 'Zoom Out' },
         ],
+      },
+      {
+        label: 'Help',
+        submenu: [{
+          label: 'Check for Updates…',
+          click: () => { void openExternalWebUrl('https://github.com/WayBetterCo/Calendar/releases/latest').catch(console.error); },
+        }],
       },
       {
         label: 'Window',

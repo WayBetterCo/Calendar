@@ -139,92 +139,21 @@ function getCoordinates(): Promise<LocalCoordinates> {
   }
 
   if (!navigator.geolocation) {
-    const fallback = coordinatesForTimezone();
-    return fallback ? Promise.resolve(fallback) : Promise.reject(new Error('Location is unavailable.'));
+    return Promise.reject(new Error('Set a city or ZIP in Settings to show local weather.'));
   }
 
   return new Promise((resolve, reject) => {
-    const fallback = coordinatesForTimezone();
-    const fallbackTimer = fallback
-      ? window.setTimeout(() => {
-          resolve(fallback);
-        }, 1500)
-      : undefined;
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        if (fallbackTimer) {
-          window.clearTimeout(fallbackTimer);
-        }
-
         cacheCoordinates(position.coords);
         resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude });
       },
       () => {
-        if (fallbackTimer) {
-          window.clearTimeout(fallbackTimer);
-        }
-
-        const fallback = coordinatesForTimezone();
-        if (fallback) {
-          resolve(fallback);
-          return;
-        }
-
         reject(new Error('Location permission is needed for local weather.'));
       },
       { enableHighAccuracy: false, maximumAge: 1000 * 60 * 60 * 6, timeout: 12000 },
     );
   });
-}
-
-function coordinatesForTimezone(): LocalCoordinates | null {
-  const timezone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined;
-  const fallbackCoordinates: Record<string, LocalCoordinates> = {
-    'America/Anchorage': { latitude: 61.2181, longitude: -149.9003 },
-    'America/Chicago': { latitude: 41.8781, longitude: -87.6298 },
-    'America/Denver': { latitude: 39.7392, longitude: -104.9903 },
-    'America/Los_Angeles': { latitude: 34.0522, longitude: -118.2437 },
-    'America/New_York': { latitude: 40.7128, longitude: -74.006 },
-    'America/Phoenix': { latitude: 33.4484, longitude: -112.074 },
-    'Pacific/Honolulu': { latitude: 21.3099, longitude: -157.8581 },
-  };
-
-  if (timezone && fallbackCoordinates[timezone]) {
-    return fallbackCoordinates[timezone];
-  }
-
-  return coordinatesForTimezoneOffset();
-}
-
-function coordinatesForTimezoneOffset(): LocalCoordinates | null {
-  const offset = new Date().getTimezoneOffset();
-
-  if (offset >= 420 && offset <= 480) {
-    return { latitude: 34.0522, longitude: -118.2437 };
-  }
-
-  if (offset === 360) {
-    return { latitude: 39.7392, longitude: -104.9903 };
-  }
-
-  if (offset === 300) {
-    return { latitude: 41.8781, longitude: -87.6298 };
-  }
-
-  if (offset === 240) {
-    return { latitude: 40.7128, longitude: -74.006 };
-  }
-
-  if (offset === 540) {
-    return { latitude: 61.2181, longitude: -149.9003 };
-  }
-
-  if (offset === 600) {
-    return { latitude: 21.3099, longitude: -157.8581 };
-  }
-
-  return null;
 }
 
 function readCachedCoordinates(): LocalCoordinates | null {
@@ -235,7 +164,7 @@ function readCachedCoordinates(): LocalCoordinates | null {
     }
 
     const parsed = JSON.parse(raw) as { latitude?: unknown; longitude?: unknown; savedAt?: unknown };
-    if (typeof parsed.latitude !== 'number' || typeof parsed.longitude !== 'number' || typeof parsed.savedAt !== 'number') {
+    if (typeof parsed.latitude !== 'number' || !Number.isFinite(parsed.latitude) || Math.abs(parsed.latitude) > 90 || typeof parsed.longitude !== 'number' || !Number.isFinite(parsed.longitude) || Math.abs(parsed.longitude) > 180 || typeof parsed.savedAt !== 'number') {
       return null;
     }
 
@@ -250,12 +179,12 @@ function readCachedCoordinates(): LocalCoordinates | null {
 }
 
 function cacheCoordinates(coords: GeolocationCoordinates): void {
-  localStorage.setItem(
-    COORDINATE_CACHE_KEY,
-    JSON.stringify({
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      savedAt: Date.now(),
-    }),
-  );
+  try {
+    localStorage.setItem(
+      COORDINATE_CACHE_KEY,
+      JSON.stringify({ latitude: coords.latitude, longitude: coords.longitude, savedAt: Date.now() }),
+    );
+  } catch {
+    // Storage denial must not prevent a resolved device location from being used.
+  }
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   CalendarAccount,
   CalendarEvent,
@@ -10,6 +11,8 @@ import type {
   UpdateEventInput,
 } from '../../shared/calendar';
 import { requestOAuthCode } from '../auth/oauth';
+import { freshTokens } from '../auth/tokenRefresh';
+import { providerError } from '../auth/providerError';
 import { getAccount, getAccountsByProvider, getTokens, saveAccount, saveTokens, type ProviderTokens } from '../storage/credentialStore';
 import { extractVideoConference } from './videoLinks';
 import type { CalendarService } from './providerTypes';
@@ -26,20 +29,12 @@ type GoogleUserInfo = {
   name?: string;
 };
 
-type GoogleCalendarList = {
-  items?: GoogleCalendarItem[];
-};
-
 type GoogleCalendarItem = {
   id: string;
   summary?: string;
   backgroundColor?: string;
   primary?: boolean;
   accessRole?: string;
-};
-
-type GoogleEventsList = {
-  items?: GoogleEvent[];
 };
 
 type GoogleEvent = {
@@ -77,7 +72,6 @@ export const googleCalendarService: CalendarService = {
     authorizationUrl.searchParams.set('response_type', 'code');
     authorizationUrl.searchParams.set('access_type', 'offline');
     authorizationUrl.searchParams.set('prompt', 'consent');
-    authorizationUrl.searchParams.set('include_granted_scopes', 'true');
 
     const codeResult = await requestOAuthCode({
       provider: 'google',
@@ -133,11 +127,10 @@ export const googleCalendarService: CalendarService = {
           singleEvents: 'true',
           orderBy: 'startTime',
           maxResults: '2500',
-          conferenceDataVersion: '1',
         });
         const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/events?${params}`;
-        const response = await googleFetch<GoogleEventsList>(url, tokens);
-        return (response.items ?? []).map((event) => mapGoogleEvent(event, calendar));
+        const events = await googlePages<GoogleEvent>(url, tokens);
+        return events.filter((event) => event.status !== 'cancelled' && (event.start?.dateTime || event.start?.date) && (event.end?.dateTime || event.end?.date)).map((event) => mapGoogleEvent(event, calendar));
       }),
     );
 
@@ -146,7 +139,7 @@ export const googleCalendarService: CalendarService = {
   async createEvent(input: CreateEventInput, calendar: CalendarSource): Promise<CalendarEvent> {
     const tokens = await getFreshGoogleTokens(calendar.accountId);
     const body = googleEventPayload(input, calendar);
-    const params = new URLSearchParams({ conferenceDataVersion: shouldCreateGoogleMeet(input) ? '1' : '0' });
+    const params = new URLSearchParams({ conferenceDataVersion: '1', sendUpdates: 'all' });
     const event = await googleFetch<GoogleEvent>(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/events?${params}`,
       tokens,
@@ -160,7 +153,7 @@ export const googleCalendarService: CalendarService = {
   async updateEvent(input: UpdateEventInput, calendar: CalendarSource): Promise<CalendarEvent> {
     const tokens = await getFreshGoogleTokens(calendar.accountId);
     const event = await googleFetch<GoogleEvent>(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/events/${encodeURIComponent(input.id)}`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/events/${encodeURIComponent(input.id)}?conferenceDataVersion=1&sendUpdates=all`,
       tokens,
       {
         method: 'PATCH',
@@ -172,7 +165,7 @@ export const googleCalendarService: CalendarService = {
   async deleteEvent(input: DeleteEventInput, calendar: CalendarSource): Promise<void> {
     const tokens = await getFreshGoogleTokens(calendar.accountId);
     await googleFetch<void>(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/events/${encodeURIComponent(input.id)}`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/events/${encodeURIComponent(input.id)}?sendUpdates=all`,
       tokens,
       { method: 'DELETE' },
     );
@@ -184,8 +177,8 @@ async function listGoogleCalendars(account?: CalendarAccount): Promise<CalendarS
   const calendarLists = await Promise.all(
     accounts.map(async (item) => {
       const tokens = await getFreshGoogleTokens(item.id);
-      const response = await googleFetch<GoogleCalendarList>('https://www.googleapis.com/calendar/v3/users/me/calendarList', tokens);
-      return (response.items ?? []).map((calendar) => mapGoogleCalendar(calendar, item));
+      const calendars = await googlePages<GoogleCalendarItem>('https://www.googleapis.com/calendar/v3/users/me/calendarList', tokens);
+      return calendars.map((calendar) => mapGoogleCalendar(calendar, item));
     }),
   );
 
@@ -193,39 +186,47 @@ async function listGoogleCalendars(account?: CalendarAccount): Promise<CalendarS
 }
 
 async function getFreshGoogleTokens(accountId: string): Promise<ProviderTokens> {
-  const tokens = getTokens(accountId);
-  if (!tokens) {
-    throw new Error('Google account is not connected.');
-  }
+  return freshTokens({
+    key: `calendar:${accountId}`,
+    label: 'Google',
+    read: () => getTokens(accountId),
+    save: (tokens) => saveTokens(accountId, tokens),
+    refresh: async (tokens) => {
+      const clientId = requiredEnv('WAYBETTER_GOOGLE_CLIENT_ID', 'Google Calendar');
+      const tokenBody = new URLSearchParams({
+        client_id: clientId,
+        grant_type: 'refresh_token',
+        refresh_token: tokens.refreshToken,
+      });
+      const clientSecret = optionalEnv('WAYBETTER_GOOGLE_CLIENT_SECRET');
+      if (clientSecret) {
+        tokenBody.set('client_secret', clientSecret);
+      }
 
-  if (new Date(tokens.expiresAt).getTime() > Date.now() + 60_000) {
-    return tokens;
-  }
-
-  if (!tokens.refreshToken) {
-    return tokens;
-  }
-
-  const clientId = requiredEnv('WAYBETTER_GOOGLE_CLIENT_ID', 'Google Calendar');
-  const tokenBody = new URLSearchParams({
-    client_id: clientId,
-    grant_type: 'refresh_token',
-    refresh_token: tokens.refreshToken,
+      const refreshed = await postForm<GoogleTokenResponse>('https://oauth2.googleapis.com/token', tokenBody);
+      const nextTokens = {
+        ...tokens,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
+        expiresAt: expiresAt(refreshed.expires_in),
+        scope: refreshed.scope ?? tokens.scope,
+      };
+      return nextTokens;
+    },
   });
-  const clientSecret = optionalEnv('WAYBETTER_GOOGLE_CLIENT_SECRET');
-  if (clientSecret) {
-    tokenBody.set('client_secret', clientSecret);
-  }
+}
 
-  const refreshed = await postForm<GoogleTokenResponse>('https://oauth2.googleapis.com/token', tokenBody);
-  const nextTokens = {
-    ...tokens,
-    accessToken: refreshed.access_token,
-    expiresAt: expiresAt(refreshed.expires_in),
-    scope: refreshed.scope ?? tokens.scope,
-  };
-  saveTokens(accountId, nextTokens);
-  return nextTokens;
+async function googlePages<T>(url: string, tokens: ProviderTokens): Promise<T[]> {
+  const items: T[] = [];
+  let pageToken: string | undefined;
+  do {
+    const pageUrl = new URL(url);
+    if (pageToken) pageUrl.searchParams.set('pageToken', pageToken);
+    const response = await googleFetch<{ items?: T[]; nextPageToken?: string }>(pageUrl.toString(), tokens);
+    items.push(...(response.items ?? []));
+    pageToken = response.nextPageToken;
+  } while (pageToken);
+  return items;
 }
 
 function mapGoogleCalendar(calendar: GoogleCalendarItem, account: CalendarAccount): CalendarSource {
@@ -291,11 +292,11 @@ function googleEventPayload(input: Partial<CreateEventInput>, calendar: Calendar
     conferenceData: shouldCreateGoogleMeet(input)
       ? {
           createRequest: {
-            requestId: `waybetter-calendar-${Date.now()}`,
+            requestId: `waybetter-calendar-${randomUUID()}`,
             conferenceSolutionKey: { type: 'hangoutsMeet' },
           },
         }
-      : undefined,
+      : input.addVideoCall === false ? null : undefined,
   };
 }
 
@@ -328,6 +329,7 @@ function accountEmailFromId(accountId: string): string {
 async function googleFetch<T>(url: string, tokens: ProviderTokens, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${tokens.accessToken}`,
       'content-type': 'application/json',
@@ -336,7 +338,7 @@ async function googleFetch<T>(url: string, tokens: ProviderTokens, init: Request
   });
 
   if (!response.ok) {
-    throw new Error(`Google Calendar request failed with ${response.status}.`);
+    throw await providerError(response, 'Google Calendar');
   }
 
   if (response.status === 204) {
@@ -349,12 +351,13 @@ async function googleFetch<T>(url: string, tokens: ProviderTokens, init: Request
 async function postForm<T>(url: string, body: URLSearchParams): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   });
 
   if (!response.ok) {
-    throw new Error(`Google OAuth request failed with ${response.status}.`);
+    throw await providerError(response, 'Google', true);
   }
 
   return (await response.json()) as T;
@@ -373,7 +376,8 @@ function expiresAt(expiresIn: number): string {
 }
 
 function dateToAllDayIso(date?: string): string {
-  return new Date(`${date ?? new Date().toISOString().slice(0, 10)}T00:00:00`).toISOString();
+  if (!date) throw new Error('Google returned an event without its date.');
+  return new Date(`${date}T00:00:00`).toISOString();
 }
 
 function requiredEnv(name: string, label: string): string {

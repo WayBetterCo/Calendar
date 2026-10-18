@@ -24,11 +24,11 @@ export function DateSection({ date, events, calendars, timeFormat, now, weatherF
   const WeatherIcon = weatherForecast ? weatherIconForCode(weatherForecast.weatherCode) : null;
   const nowTime = now.getTime();
   const activeEventId = today
-    ? events.find((event) => !event.isAllDay && new Date(event.startsAt).getTime() <= nowTime && new Date(event.endsAt).getTime() > nowTime)?.id
+    ? events.find((event) => !event.isAllDay && new Date(event.startsAt).getTime() <= nowTime && new Date(event.endsAt).getTime() > nowTime)
     : undefined;
   const nextEventId =
     today && !activeEventId
-      ? events.find((event) => !event.isAllDay && new Date(event.startsAt).getTime() >= nowTime && new Date(event.endsAt).getTime() > nowTime)?.id
+      ? events.find((event) => !event.isAllDay && new Date(event.startsAt).getTime() >= nowTime && new Date(event.endsAt).getTime() > nowTime)
       : undefined;
 
   return (
@@ -71,13 +71,13 @@ export function DateSection({ date, events, calendars, timeFormat, now, weatherF
           {events.length ? (
             events.map((event) => (
               <EventRow
-                key={event.id}
+                key={`${event.calendarId}:${event.id}`}
                 event={event}
                 calendar={calendars.find((calendar) => calendar.id === event.calendarId)}
                 timeFormat={timeFormat}
                 now={now}
-                isCurrent={event.id === activeEventId}
-                isNext={event.id === nextEventId}
+                isCurrent={event === activeEventId}
+                isNext={event === nextEventId}
                 onEdit={onEdit}
               />
             ))

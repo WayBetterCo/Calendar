@@ -6,6 +6,8 @@ import type {
   VideoConference,
 } from '../../shared/calendar';
 import { requestOAuthCode } from '../auth/oauth';
+import { freshTokens } from '../auth/tokenRefresh';
+import { providerError } from '../auth/providerError';
 import {
   getAccountsByProvider,
   getVideoAccountsByProvider,
@@ -223,6 +225,7 @@ async function createZoomMeeting(input: VideoMeetingInput): Promise<VideoConfere
     }),
   });
 
+  if (!response.join_url) throw new Error('Zoom did not return a meeting join URL.');
   return { provider: 'zoom', label: 'Zoom', url: response.join_url };
 }
 
@@ -250,74 +253,63 @@ async function createTeamsMeeting(input: VideoMeetingInput): Promise<VideoConfer
 }
 
 async function getFreshZoomTokens(accountId: string): Promise<ProviderTokens> {
-  const tokens = getVideoTokens(accountId);
-  if (!tokens) {
-    throw new Error('Zoom account is not connected.');
-  }
-
-  if (new Date(tokens.expiresAt).getTime() > Date.now() + 60_000) {
-    return tokens;
-  }
-
-  if (!tokens.refreshToken) {
-    return tokens;
-  }
-
-  const refreshed = await zoomTokenRequest<ZoomTokenResponse>(
-    new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refreshToken,
-    }),
-    requiredEnv('WAYBETTER_ZOOM_CLIENT_ID', 'Zoom'),
-    requiredEnv('WAYBETTER_ZOOM_CLIENT_SECRET', 'Zoom'),
-  );
-  const nextTokens = {
-    ...tokens,
-    accessToken: refreshed.access_token,
-    refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
-    expiresAt: expiresAt(refreshed.expires_in),
-    scope: refreshed.scope ?? tokens.scope,
-  };
-  saveVideoTokens(accountId, nextTokens);
-  return nextTokens;
+  return freshTokens({
+    key: `video:${accountId}`,
+    label: 'Zoom',
+    read: () => getVideoTokens(accountId),
+    save: (tokens) => saveVideoTokens(accountId, tokens),
+    refresh: async (tokens) => {
+      const refreshed = await zoomTokenRequest<ZoomTokenResponse>(
+        new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: tokens.refreshToken,
+        }),
+        requiredEnv('WAYBETTER_ZOOM_CLIENT_ID', 'Zoom'),
+        requiredEnv('WAYBETTER_ZOOM_CLIENT_SECRET', 'Zoom'),
+      );
+      const nextTokens = {
+        ...tokens,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
+        expiresAt: expiresAt(refreshed.expires_in),
+        scope: refreshed.scope ?? tokens.scope,
+      };
+      return nextTokens;
+    },
+  });
 }
 
 async function getFreshTeamsTokens(accountId: string): Promise<ProviderTokens> {
-  const tokens = getVideoTokens(accountId);
-  if (!tokens) {
-    throw new Error('Teams account is not connected.');
-  }
-
-  if (new Date(tokens.expiresAt).getTime() > Date.now() + 60_000) {
-    return tokens;
-  }
-
-  if (!tokens.refreshToken) {
-    return tokens;
-  }
-
-  const refreshed = await microsoftTokenRequest<MicrosoftTokenResponse>(
-    new URLSearchParams({
-      client_id: requiredEnv('WAYBETTER_TEAMS_CLIENT_ID', 'Teams'),
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refreshToken,
-      scope: TEAMS_SCOPES.join(' '),
-    }),
-  );
-  const nextTokens = {
-    ...tokens,
-    accessToken: refreshed.access_token,
-    refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
-    expiresAt: expiresAt(refreshed.expires_in),
-    scope: refreshed.scope ?? tokens.scope,
-  };
-  saveVideoTokens(accountId, nextTokens);
-  return nextTokens;
+  return freshTokens({
+    key: `video:${accountId}`,
+    label: 'Teams',
+    read: () => getVideoTokens(accountId),
+    save: (tokens) => saveVideoTokens(accountId, tokens),
+    refresh: async (tokens) => {
+      const refreshed = await microsoftTokenRequest<MicrosoftTokenResponse>(
+        new URLSearchParams({
+          client_id: requiredEnv('WAYBETTER_TEAMS_CLIENT_ID', 'Teams'),
+          grant_type: 'refresh_token',
+          refresh_token: tokens.refreshToken,
+          scope: TEAMS_SCOPES.join(' '),
+        }),
+      );
+      const nextTokens = {
+        ...tokens,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
+        expiresAt: expiresAt(refreshed.expires_in),
+        scope: refreshed.scope ?? tokens.scope,
+      };
+      return nextTokens;
+    },
+  });
 }
 
 async function zoomFetch<T>(url: string, tokens: ProviderTokens, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${tokens.accessToken}`,
       'content-type': 'application/json',
@@ -326,7 +318,7 @@ async function zoomFetch<T>(url: string, tokens: ProviderTokens, init: RequestIn
   });
 
   if (!response.ok) {
-    throw new Error(`Zoom request failed with ${response.status}.`);
+    throw await providerError(response, 'Zoom');
   }
 
   return (await response.json()) as T;
@@ -335,6 +327,7 @@ async function zoomFetch<T>(url: string, tokens: ProviderTokens, init: RequestIn
 async function microsoftFetch<T>(url: string, tokens: ProviderTokens, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${tokens.accessToken}`,
       'content-type': 'application/json',
@@ -343,7 +336,7 @@ async function microsoftFetch<T>(url: string, tokens: ProviderTokens, init: Requ
   });
 
   if (!response.ok) {
-    throw new Error(`Teams request failed with ${response.status}.`);
+    throw await providerError(response, 'Teams');
   }
 
   return (await response.json()) as T;
@@ -352,6 +345,7 @@ async function microsoftFetch<T>(url: string, tokens: ProviderTokens, init: Requ
 async function zoomTokenRequest<T>(body: URLSearchParams, clientId: string, clientSecret: string): Promise<T> {
   const response = await fetch('https://zoom.us/oauth/token', {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: {
       authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
       'content-type': 'application/x-www-form-urlencoded',
@@ -360,7 +354,7 @@ async function zoomTokenRequest<T>(body: URLSearchParams, clientId: string, clie
   });
 
   if (!response.ok) {
-    throw new Error(`Zoom OAuth request failed with ${response.status}.`);
+    throw await providerError(response, 'Zoom', true);
   }
 
   return (await response.json()) as T;
@@ -369,12 +363,13 @@ async function zoomTokenRequest<T>(body: URLSearchParams, clientId: string, clie
 async function microsoftTokenRequest<T>(body: URLSearchParams): Promise<T> {
   const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   });
 
   if (!response.ok) {
-    throw new Error(`Teams OAuth request failed with ${response.status}.`);
+    throw await providerError(response, 'Teams', true);
   }
 
   return (await response.json()) as T;

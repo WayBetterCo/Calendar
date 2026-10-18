@@ -1,7 +1,6 @@
 import {
   addDays,
   differenceInCalendarDays,
-  endOfDay,
   format,
   isToday,
   isTomorrow,
@@ -18,7 +17,7 @@ export function getAgendaRange(selectedDate: Date, days = 7): { startsAt: string
   const start = startOfDay(selectedDate);
   return {
     startsAt: start.toISOString(),
-    endsAt: endOfDay(addDays(start, days - 1)).toISOString(),
+    endsAt: addDays(start, days).toISOString(),
     dates: Array.from({ length: days }, (_, index) => addDays(start, index)),
   };
 }
@@ -78,28 +77,18 @@ export function getRelativeDayHint(date: Date): string {
   return `${Math.abs(delta)} days ago`;
 }
 
-export function defaultDraftTimes(date: Date): { startTime: string; endTime: string } {
+export function defaultDraftTimes(date: Date, durationMinutes = 30): { startTime: string; endTime: string } {
   const now = new Date();
   const sameDay = toDateKey(now) === toDateKey(date);
-  const baseHour = sameDay ? Math.max(now.getHours() + 1, 9) : 9;
-  const start = setToQuarterHour(baseHour, sameDay ? nextQuarterMinute(now.getMinutes()) : 0);
-  const [hour, minute] = start.split(':').map(Number);
-  const endDate = new Date(date);
-  endDate.setHours(hour, minute + 30, 0, 0);
-
+  const latestStart = Math.floor((24 * 60 - durationMinutes - 1) / 15) * 15;
+  const nextQuarter = Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / 15) * 15;
+  const startMinute = Math.min(sameDay ? Math.max(nextQuarter, 9 * 60) : 9 * 60, latestStart);
   return {
-    startTime: start,
-    endTime: format(endDate, 'HH:mm'),
+    startTime: timeFromMinutes(startMinute),
+    endTime: timeFromMinutes(startMinute + durationMinutes),
   };
 }
 
-function setToQuarterHour(hour: number, minute: number): string {
-  const extraHour = minute >= 60 ? 1 : 0;
-  const clampedHour = Math.min(Math.max(hour + extraHour, 0), 23);
-  const clampedMinute = minute >= 60 ? 0 : minute;
-  return `${String(clampedHour).padStart(2, '0')}:${String(clampedMinute).padStart(2, '0')}`;
-}
-
-function nextQuarterMinute(minute: number): number {
-  return Math.ceil(minute / 15) * 15;
+function timeFromMinutes(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }

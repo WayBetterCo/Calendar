@@ -1,19 +1,30 @@
-import { parseISO } from 'date-fns';
+import { addDays, parseISO, startOfDay } from 'date-fns';
 import type { CalendarEvent } from '../types/calendar';
 import { toDateKey } from './dates';
 
-export function groupEventsByDate(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
+export function eventOccursOnDate(event: CalendarEvent, date: Date): boolean {
+  const dayStart = startOfDay(date);
+  const dayEnd = addDays(dayStart, 1);
+  const eventStart = parseISO(event.startsAt).getTime();
+  const eventEnd = parseISO(event.endsAt).getTime();
+  return eventStart < dayEnd.getTime() && eventEnd > dayStart.getTime();
+}
+
+export function groupEventsByDate(events: CalendarEvent[], dates?: Date[]): Map<string, CalendarEvent[]> {
   const groups = new Map<string, CalendarEvent[]>();
 
   for (const event of events) {
-    const key = toDateKey(event.startsAt);
-    groups.set(key, [...(groups.get(key) ?? []), event]);
+    const eventDates = dates?.filter((date) => eventOccursOnDate(event, date)) ?? [parseISO(event.startsAt)];
+    for (const date of eventDates) {
+      const key = toDateKey(date);
+      groups.set(key, [...(groups.get(key) ?? []), event]);
+    }
   }
 
   for (const [key, group] of groups) {
     groups.set(
       key,
-      group.sort((a, b) => parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime()),
+      group.sort((a, b) => Number(b.isAllDay) - Number(a.isAllDay) || parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime()),
     );
   }
 

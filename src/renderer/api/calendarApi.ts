@@ -14,9 +14,28 @@ import type {
   VideoAccount,
 } from '../types/calendar';
 import { getMockEvents, mockCalendars, mockSettings } from '../../shared/mockData';
+import { parseISO } from 'date-fns';
 
-let browserSettings = mockSettings;
-let browserCreatedEvents: CalendarEvent[] = [];
+const BROWSER_SETTINGS_KEY = 'waybetter-calendar-preview-settings';
+const BROWSER_EVENTS_KEY = 'waybetter-calendar-preview-events';
+let browserSettings: AppSettings = { ...mockSettings, ...readBrowserState<Partial<AppSettings>>(BROWSER_SETTINGS_KEY) };
+let browserEvents = readBrowserState<CalendarEvent[]>(BROWSER_EVENTS_KEY) ?? getMockEvents();
+
+function readBrowserState<T>(key: string): T | null {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? 'null') as T | null;
+  } catch {
+    return null;
+  }
+}
+
+function saveBrowserState(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Preview stays usable when the browser denies storage.
+  }
+}
 
 function hasPreloadApi(): boolean {
   return typeof window.waybetterCalendar !== 'undefined';
@@ -33,20 +52,19 @@ function preloadApi() {
 function listBrowserEvents(input: ListEventsInput): CalendarEvent[] {
   const startsAt = new Date(input.startsAt).getTime();
   const endsAt = new Date(input.endsAt).getTime();
-  const visible = new Set(input.calendarIds?.length ? input.calendarIds : browserSettings.selectedCalendarIds);
+  const visible = new Set(input.calendarIds ?? browserSettings.selectedCalendarIds);
   const search = input.search?.trim().toLowerCase();
 
-  return [...getMockEvents(), ...browserCreatedEvents]
+  return browserEvents
     .filter((event) => visible.has(event.calendarId))
-    .filter((event) => new Date(event.startsAt).getTime() >= startsAt)
-    .filter((event) => new Date(event.startsAt).getTime() < endsAt)
+    .filter((event) => parseISO(event.endsAt).getTime() > startsAt && parseISO(event.startsAt).getTime() < endsAt)
     .filter((event) => {
       if (!search) {
         return true;
       }
 
       const calendar = mockCalendars.find((source) => source.id === event.calendarId);
-      return [event.title, event.location, event.description, calendar?.name]
+      return [event.title, event.location, event.description, calendar?.name, ...(event.attendees ?? []).flatMap((guest) => [guest.name, guest.email])]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
@@ -65,7 +83,8 @@ export const calendarApi = {
   },
   createEvent(input: CreateEventInput): Promise<CalendarEvent> {
     if (!hasPreloadApi()) {
-      const id = `browser_${Date.now()}`;
+      if (input.addVideoCall) return Promise.reject(new Error('Connect a calendar account in the desktop app to create a video meeting.'));
+      const id = `browser_${crypto.randomUUID()}`;
       const event: CalendarEvent = {
         id,
         providerEventId: id,
@@ -78,9 +97,10 @@ export const calendarApi = {
         location: input.location,
         description: input.notes,
         attendees: input.guests.map((email) => ({ email })),
-        video: input.addVideoCall ? browserVideoConference(input.videoProvider ?? 'google_meet') : null,
+        video: null,
       };
-      browserCreatedEvents = [...browserCreatedEvents, event];
+      browserEvents = [...browserEvents, event];
+      saveBrowserState(BROWSER_EVENTS_KEY, browserEvents);
       return Promise.resolve(event);
     }
 
@@ -88,14 +108,31 @@ export const calendarApi = {
   },
   updateEvent(input: UpdateEventInput): Promise<CalendarEvent> {
     if (!hasPreloadApi()) {
-      return Promise.reject(new Error('Browser preview cannot update provider events.'));
+      const existing = browserEvents.find((event) => event.id === input.id && event.calendarId === input.calendarId);
+      if (!existing) return Promise.reject(new Error('Event was not found.'));
+      const date = input.date ?? formatLocalDate(existing.startsAt);
+      const event: CalendarEvent = {
+        ...existing,
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.startTime !== undefined ? { startsAt: new Date(`${date}T${input.startTime}:00`).toISOString() } : {}),
+        ...(input.endTime !== undefined ? { endsAt: new Date(`${date}T${input.endTime}:00`).toISOString() } : {}),
+        ...(input.location !== undefined ? { location: input.location } : {}),
+        ...(input.notes !== undefined ? { description: input.notes } : {}),
+        ...(input.guests !== undefined ? { attendees: input.guests.map((email) => ({ email })) } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      browserEvents = browserEvents.map((item) => item === existing ? event : item);
+      saveBrowserState(BROWSER_EVENTS_KEY, browserEvents);
+      return Promise.resolve(event);
     }
 
     return preloadApi().calendar.updateEvent(input);
   },
   deleteEvent(input: DeleteEventInput): Promise<void> {
     if (!hasPreloadApi()) {
-      return Promise.reject(new Error('Browser preview cannot delete provider events.'));
+      browserEvents = browserEvents.filter((event) => event.id !== input.id || event.calendarId !== input.calendarId);
+      saveBrowserState(BROWSER_EVENTS_KEY, browserEvents);
+      return Promise.resolve();
     }
 
     return preloadApi().calendar.deleteEvent(input);
@@ -167,6 +204,7 @@ export const calendarApi = {
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     if (!hasPreloadApi()) {
       browserSettings = { ...browserSettings, ...patch };
+      saveBrowserState(BROWSER_SETTINGS_KEY, browserSettings);
       return Promise.resolve(browserSettings);
     }
 
@@ -174,14 +212,7 @@ export const calendarApi = {
   },
 };
 
-function browserVideoConference(provider: 'google_meet' | 'zoom' | 'teams'): CalendarEvent['video'] {
-  if (provider === 'zoom') {
-    return { provider: 'zoom', label: 'Zoom', url: 'https://zoom.us/j/123456789' };
-  }
-
-  if (provider === 'teams') {
-    return { provider: 'teams', label: 'Teams', url: 'https://teams.microsoft.com/l/meetup-join/example' };
-  }
-
-  return { provider: 'google_meet', label: 'Meet', url: 'https://meet.google.com/new-waybetter-calendar-event' };
+function formatLocalDate(value: string): string {
+  const date = parseISO(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }

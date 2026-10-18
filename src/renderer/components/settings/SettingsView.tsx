@@ -16,6 +16,7 @@ type SettingsViewProps = {
   isConnectingVideo: boolean;
   connectionError: string;
   videoConnectionError: string;
+  settingsError: string;
   onClose: () => void;
   onConnect: (provider: Extract<CalendarProvider, 'google' | 'microsoft'>) => void;
   onDisconnect: (accountId: string) => void;
@@ -35,6 +36,7 @@ export function SettingsView({
   isConnectingVideo,
   connectionError,
   videoConnectionError,
+  settingsError,
   onClose,
   onConnect,
   onDisconnect,
@@ -60,6 +62,8 @@ export function SettingsView({
           </button>
         </div>
 
+        {settingsError ? <div className="form-error" role="alert">Could not save settings: {settingsError}</div> : null}
+
         <div className="settings-group">
           <h3>Calendar connections</h3>
           <div className="connection-buttons">
@@ -82,7 +86,7 @@ export function SettingsView({
                     <strong>{account.displayName}</strong>
                     <span>{account.provider === 'google' ? 'Google Calendar' : 'Microsoft 365'} · {account.email}</span>
                   </div>
-                  <button type="button" className="text-button" onClick={() => onDisconnect(account.id)}>
+                  <button type="button" className="text-button" disabled={isConnecting} onClick={() => onDisconnect(account.id)}>
                     Disconnect
                   </button>
                 </div>
@@ -122,7 +126,7 @@ export function SettingsView({
                     <span>{videoProviderName(account.provider)} · {account.email}</span>
                   </div>
                   {account.provider !== 'google_meet' ? (
-                    <button type="button" className="text-button" onClick={() => onDisconnectVideo(account.id)}>
+                    <button type="button" className="text-button" disabled={isConnectingVideo} onClick={() => onDisconnectVideo(account.id)}>
                       Disconnect
                     </button>
                   ) : null}
@@ -141,7 +145,7 @@ export function SettingsView({
           <label className="field-label">
             Calendar
             <select value={settings.defaultCalendarId} onChange={(event) => onPatch({ defaultCalendarId: event.currentTarget.value })}>
-              {calendars.map((calendar) => (
+              {calendars.filter((calendar) => calendar.canWrite !== false).map((calendar) => (
                 <option key={calendar.id} value={calendar.id}>
                   {calendar.name}
                 </option>
@@ -154,6 +158,7 @@ export function SettingsView({
               value={settings.defaultDurationMinutes}
               onChange={(event) => onPatch({ defaultDurationMinutes: Number(event.currentTarget.value) })}
             >
+              <option value={15}>15 minutes</option>
               <option value={30}>30 minutes</option>
               <option value={45}>45 minutes</option>
               <option value={60}>60 minutes</option>

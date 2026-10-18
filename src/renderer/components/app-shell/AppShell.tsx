@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import { Footer } from './Footer';
 import { Header } from './Header';
-import type { CalendarSource } from '../../types/calendar';
+import type { CalendarAccount, CalendarSource } from '../../types/calendar';
 
 type AppShellProps = {
   calendars: CalendarSource[];
+  accounts: CalendarAccount[];
   eventCountLabel: string;
   weekEventCountLabel: string;
   selectedCalendarIds: string[];
@@ -42,7 +43,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         onCreate={props.onCreate}
       />
       {props.children}
-      <Footer calendars={props.calendars} onSettings={props.onSettings} />
+      <Footer accounts={props.accounts} onSettings={props.onSettings} />
     </div>
   );
 }

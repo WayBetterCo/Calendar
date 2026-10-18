@@ -10,6 +10,8 @@ import type {
   UpdateEventInput,
 } from '../../shared/calendar';
 import { requestOAuthCode } from '../auth/oauth';
+import { freshTokens } from '../auth/tokenRefresh';
+import { providerError } from '../auth/providerError';
 import { getAccount, getAccountsByProvider, getTokens, saveAccount, saveTokens, type ProviderTokens } from '../storage/credentialStore';
 import { extractVideoConference } from './videoLinks';
 import type { CalendarService } from './providerTypes';
@@ -30,6 +32,7 @@ type MicrosoftUser = {
 
 type MicrosoftList<T> = {
   value?: T[];
+  '@odata.nextLink'?: string;
 };
 
 type MicrosoftCalendar = {
@@ -49,6 +52,7 @@ type MicrosoftEvent = {
   start?: { dateTime?: string; timeZone?: string };
   end?: { dateTime?: string; timeZone?: string };
   isAllDay?: boolean;
+  isCancelled?: boolean;
   showAs?: string;
   webLink?: string;
   lastModifiedDateTime?: string;
@@ -123,11 +127,11 @@ export const microsoftCalendarService: CalendarService = {
           '$top': '250',
           '$orderby': 'start/dateTime',
         });
-        const response = await microsoftFetch<MicrosoftList<MicrosoftEvent>>(
+        const events = await microsoftPages<MicrosoftEvent>(
           `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(providerCalendarId(calendar.id))}/calendarView?${params}`,
           tokens,
         );
-        return (response.value ?? []).map((event) => mapMicrosoftEvent(event, calendar));
+        return events.filter((event) => !event.isCancelled).map((event) => mapMicrosoftEvent(event, calendar));
       }),
     );
 
@@ -172,8 +176,8 @@ async function listMicrosoftCalendars(account?: CalendarAccount): Promise<Calend
   const calendarLists = await Promise.all(
     accounts.map(async (item) => {
       const tokens = await getFreshMicrosoftTokens(item.id);
-      const response = await microsoftFetch<MicrosoftList<MicrosoftCalendar>>('https://graph.microsoft.com/v1.0/me/calendars', tokens);
-      return (response.value ?? []).map((calendar) => mapMicrosoftCalendar(calendar, item));
+      const calendars = await microsoftPages<MicrosoftCalendar>('https://graph.microsoft.com/v1.0/me/calendars', tokens);
+      return calendars.map((calendar) => mapMicrosoftCalendar(calendar, item));
     }),
   );
 
@@ -181,36 +185,45 @@ async function listMicrosoftCalendars(account?: CalendarAccount): Promise<Calend
 }
 
 async function getFreshMicrosoftTokens(accountId: string): Promise<ProviderTokens> {
-  const tokens = getTokens(accountId);
-  if (!tokens) {
-    throw new Error('Microsoft account is not connected.');
-  }
+  return freshTokens({
+    key: `calendar:${accountId}`,
+    label: 'Microsoft',
+    read: () => getTokens(accountId),
+    save: (tokens) => saveTokens(accountId, tokens),
+    refresh: async (tokens) => {
+      const refreshed = await postMicrosoftForm<MicrosoftTokenResponse>(
+        new URLSearchParams({
+          client_id: requiredEnv('WAYBETTER_MICROSOFT_CLIENT_ID', 'Microsoft Calendar'),
+          grant_type: 'refresh_token',
+          refresh_token: tokens.refreshToken,
+          scope: MICROSOFT_SCOPES.join(' '),
+        }),
+      );
+      const nextTokens = {
+        ...tokens,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
+        expiresAt: expiresAt(refreshed.expires_in),
+        scope: refreshed.scope ?? tokens.scope,
+      };
+      return nextTokens;
+    },
+  });
+}
 
-  if (new Date(tokens.expiresAt).getTime() > Date.now() + 60_000) {
-    return tokens;
+async function microsoftPages<T>(url: string, tokens: ProviderTokens): Promise<T[]> {
+  const items: T[] = [];
+  let nextUrl: string | undefined = url;
+  while (nextUrl) {
+    // Never forward account credentials to an unexpected pagination origin.
+    if (new URL(nextUrl).origin !== 'https://graph.microsoft.com') {
+      throw new Error('Microsoft returned an invalid calendar page URL.');
+    }
+    const response: MicrosoftList<T> = await microsoftFetch<MicrosoftList<T>>(nextUrl, tokens);
+    items.push(...(response.value ?? []));
+    nextUrl = response['@odata.nextLink'];
   }
-
-  if (!tokens.refreshToken) {
-    return tokens;
-  }
-
-  const refreshed = await postMicrosoftForm<MicrosoftTokenResponse>(
-    new URLSearchParams({
-      client_id: requiredEnv('WAYBETTER_MICROSOFT_CLIENT_ID', 'Microsoft Calendar'),
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refreshToken,
-      scope: MICROSOFT_SCOPES.join(' '),
-    }),
-  );
-  const nextTokens = {
-    ...tokens,
-    accessToken: refreshed.access_token,
-    refreshToken: refreshed.refresh_token ?? tokens.refreshToken,
-    expiresAt: expiresAt(refreshed.expires_in),
-    scope: refreshed.scope ?? tokens.scope,
-  };
-  saveTokens(accountId, nextTokens);
-  return nextTokens;
+  return items;
 }
 
 function mapMicrosoftCalendar(calendar: MicrosoftCalendar, account: CalendarAccount): CalendarSource {
@@ -238,8 +251,8 @@ function mapMicrosoftEvent(event: MicrosoftEvent, calendar: CalendarSource): Cal
     title: event.subject ?? 'Untitled event',
     description,
     location: event.location?.displayName,
-    startsAt: graphDateToIso(event.start?.dateTime),
-    endsAt: graphDateToIso(event.end?.dateTime),
+    startsAt: graphDateToIso(event.start?.dateTime, event.isAllDay),
+    endsAt: graphDateToIso(event.end?.dateTime, event.isAllDay),
     isAllDay: Boolean(event.isAllDay),
     timezone: event.start?.timeZone,
     status: event.showAs === 'free' ? 'tentative' : 'confirmed',
@@ -265,10 +278,10 @@ function microsoftEventPayload(input: Partial<CreateEventInput>, calendar: Calen
 
   return {
     subject: input.title,
-    body: input.notes ? { contentType: 'text', content: input.notes } : undefined,
-    location: input.location ? { displayName: input.location } : undefined,
-    start: date && startTime ? { dateTime: `${date}T${startTime}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } : undefined,
-    end: date && endTime ? { dateTime: `${date}T${endTime}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } : undefined,
+    body: input.notes !== undefined ? { contentType: 'text', content: input.notes } : undefined,
+    location: input.location !== undefined ? { displayName: input.location } : undefined,
+    start: date && startTime ? { dateTime: new Date(`${date}T${startTime}:00`).toISOString(), timeZone: 'UTC' } : undefined,
+    end: date && endTime ? { dateTime: new Date(`${date}T${endTime}:00`).toISOString(), timeZone: 'UTC' } : undefined,
     attendees: input.guests ? microsoftAttendees(input.guests, calendar).map((email) => ({
       emailAddress: { address: email },
       type: 'required',
@@ -300,15 +313,17 @@ function accountEmailFromId(accountId: string): string {
 async function microsoftFetch<T>(url: string, tokens: ProviderTokens, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${tokens.accessToken}`,
       'content-type': 'application/json',
+      Prefer: 'outlook.timezone="UTC"',
       ...(init.headers ?? {}),
     },
   });
 
   if (!response.ok) {
-    throw new Error(`Microsoft Graph request failed with ${response.status}.`);
+    throw await providerError(response, 'Microsoft Calendar');
   }
 
   if (response.status === 204) {
@@ -321,12 +336,13 @@ async function microsoftFetch<T>(url: string, tokens: ProviderTokens, init: Requ
 async function postMicrosoftForm<T>(body: URLSearchParams): Promise<T> {
   const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   });
 
   if (!response.ok) {
-    throw new Error(`Microsoft OAuth request failed with ${response.status}.`);
+    throw await providerError(response, 'Microsoft', true);
   }
 
   return (await response.json()) as T;
@@ -340,8 +356,13 @@ function providerCalendarId(calendarId: string): string {
   return decodeURIComponent(calendarId.split('::')[2] ?? calendarId);
 }
 
-function graphDateToIso(dateTime?: string): string {
-  return new Date(dateTime ?? new Date().toISOString()).toISOString();
+function graphDateToIso(dateTime?: string, isAllDay = false): string {
+  if (!dateTime) throw new Error('Microsoft returned an event without its date.');
+  // All-day entries represent calendar dates, not instants shifted into the local day.
+  if (isAllDay) return new Date(`${dateTime.slice(0, 10)}T00:00:00`).toISOString();
+  // Graph returns UTC dateTime values without a Z suffix, even with UTC requested.
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/i.test(dateTime) ? dateTime : `${dateTime}Z`;
+  return new Date(normalized).toISOString();
 }
 
 function mapMicrosoftResponse(response?: string): EventAttendee['responseStatus'] {

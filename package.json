@@ -1,7 +1,7 @@
 {
   "name": "waybetter-calendar",
   "productName": "WayBetter Calendar",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "A slim desktop calendar app.",
   "homepage": "https://www.thewaybetter.co",
   "main": "./out/main/index.js",
@@ -9,15 +9,19 @@
     "dev": "node scripts/dev.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package": "npm run build && electron-builder --mac --dir",
-    "dist": "npm run build && electron-builder --mac",
-    "dist:mac": "npm run build && electron-builder --mac --x64 --arm64 --publish never",
-    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
-    "dist:linux": "npm run build && electron-builder --linux --x64 --publish never",
+    "package": "npm run build && electron-builder --mac --dir --publish never",
+    "dist": "npm run dist:mac",
+    "dist:mac": "npm run check && npm run build && electron-builder --mac --x64 --arm64 --publish never",
+    "dist:win": "npm run check && npm run build && electron-builder --win --x64 --publish never",
+    "dist:linux": "npm run check && npm run build && electron-builder --linux --x64 --publish never",
     "prepare:release-env": "node scripts/write-release-env.mjs",
     "install:local": "node scripts/install-local.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test",
+    "smoke:packaged": "node scripts/smoke-packaged.mjs",
+    "dist:mac:arm64": "npm run check && npm run build && electron-builder --mac --arm64 --publish never",
+    "dist:mac:x64": "npm run check && npm run build && electron-builder --mac --x64 --publish never"
   },
   "keywords": [
     "calendar",
@@ -34,12 +38,12 @@
     "directories": {
       "output": "dist"
     },
-    "artifactName": "WayBetter-Calendar-${os}-${arch}.${ext}",
+    "artifactName": "WayBetter-Calendar-${version}-${os}-${arch}.${ext}",
     "files": [
       "out/**/*",
-      "resources/**/*",
-      "!resources/**/*.psd",
-      "!resources/**/.DS_Store",
+      "resources/.env",
+      "resources/waybetter-calendar-icon.png",
+      "resources/waybetter-calendar-icon.icns",
       "package.json"
     ],
     "mac": {
@@ -64,31 +68,39 @@
       "target": [
         "AppImage"
       ]
-    }
+    },
+    "beforePack": "./scripts/before-pack.cjs"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
-    "@tanstack/react-query": "^5.101.0",
-    "@types/node": "^25.9.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "bootstrap-icons": "^1.13.1",
-    "electron": "^42.3.3",
-    "electron-builder": "^26.15.2",
-    "electron-vite": "^5.0.0",
-    "lucide-react": "^1.17.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "simple-icons": "^16.22.0",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.5",
-    "vitest": "^4.1.8",
-    "zustand": "^5.0.14"
+    "@tanstack/react-query": "^5.104.4",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "lucide-react": "^1.59.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^4.1.12",
+    "zustand": "^5.0.15"
   },
   "dependencies": {
     "date-fns": "^4.4.0",
-    "dotenv": "^17.4.2",
-    "zod": "^4.4.3"
+    "dotenv": "^18.0.8",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "@electron/get": {
+        "global-agent": "^4.1.3"
+      }
+    }
   }
 }

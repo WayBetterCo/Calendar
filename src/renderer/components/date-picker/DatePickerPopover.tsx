@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 
 type DatePickerPopoverProps = {
   value: Date;
@@ -12,7 +12,10 @@ export function DatePickerPopover({ value, onChange }: DatePickerPopoverProps): 
       type="date"
       aria-label="Select agenda date"
       value={format(value, 'yyyy-MM-dd')}
-      onChange={(event) => onChange(new Date(`${event.currentTarget.value}T00:00:00`))}
+      onChange={(event) => {
+        const date = parseISO(event.currentTarget.value);
+        if (isValid(date)) onChange(date);
+      }}
     />
   );
 }

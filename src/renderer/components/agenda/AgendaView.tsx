@@ -11,6 +11,8 @@ type AgendaViewProps = {
   now: Date;
   weatherForecast: WeatherForecast | null;
   isLoading: boolean;
+  error?: string;
+  onRetry: () => void;
   onCreate: (date: Date) => void;
   onEdit: (event: CalendarEvent) => void;
 };
@@ -23,10 +25,12 @@ export function AgendaView({
   now,
   weatherForecast,
   isLoading,
+  error,
+  onRetry,
   onCreate,
   onEdit,
 }: AgendaViewProps): React.JSX.Element {
-  const groups = groupEventsByDate(events);
+  const groups = groupEventsByDate(events, dates);
 
   if (isLoading) {
     return (
@@ -44,6 +48,13 @@ export function AgendaView({
 
   return (
     <main className="agenda-scroll">
+      {error ? (
+        <div className="form-error agenda-error" role="alert">
+          <strong>Could not refresh your calendar.</strong>
+          <span>{error}</span>
+          <button type="button" className="secondary-button" onClick={onRetry}>Try again</button>
+        </div>
+      ) : null}
       {dates.map((date) => (
         <DateSection
           key={toDateKey(date)}

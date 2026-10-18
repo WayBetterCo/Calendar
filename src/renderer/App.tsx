@@ -7,6 +7,9 @@ import { CreateEventModal } from './components/event-create/CreateEventModal';
 import { SettingsView } from './components/settings/SettingsView';
 import { calendarApi } from './api/calendarApi';
 import { getAgendaRange } from './lib/dates';
+import { updateEventPayload } from './lib/eventDraft';
+import { eventOccursOnDate } from './lib/events';
+import { isEditingField } from './lib/shortcuts';
 import { useAgendaStore } from './state/useAgendaStore';
 import { useSettingsStore } from './state/useSettingsStore';
 import type { AppSettings, CalendarEvent, CreateEventInput, DeleteEventInput, UpdateEventInput, WeatherForecast } from './types/calendar';
@@ -72,10 +75,14 @@ export function App(): React.JSX.Element {
 
   const settingsMutation = useMutation({
     mutationFn: calendarApi.updateSettings,
+    scope: { id: 'settings' },
     onSuccess: (nextSettings) => {
       setSettings(nextSettings);
       void queryClient.invalidateQueries({ queryKey: ['settings'] });
       void queryClient.invalidateQueries({ queryKey: ['events'] });
+    },
+    onError: () => {
+      if (settingsQuery.data) setSettings(settingsQuery.data);
     },
   });
 
@@ -150,22 +157,29 @@ export function App(): React.JSX.Element {
       };
     }
 
-    getLocalWeatherForecast(weatherUnit, weatherLocation)
-      .then((forecast) => {
-        if (!cancelled) {
-          setWeatherForecast(forecast);
-          setWeatherLabel(formatWeatherForecast(forecast));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWeatherForecast(null);
-          setWeatherLabel('Weather --');
-        }
-      });
+    function refreshWeather(): void {
+      void getLocalWeatherForecast(weatherUnit, weatherLocation)
+        .then((forecast) => {
+          if (!cancelled) {
+            setWeatherForecast(forecast);
+            setWeatherLabel(formatWeatherForecast(forecast));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setWeatherForecast(null);
+            setWeatherLabel('Weather --');
+          }
+        });
+    }
+
+    const debounce = window.setTimeout(refreshWeather, 500);
+    const interval = window.setInterval(refreshWeather, 15 * 60_000);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(debounce);
+      window.clearInterval(interval);
     };
   }, [showWeather, weatherUnit, weatherLocation]);
 
@@ -176,19 +190,32 @@ export function App(): React.JSX.Element {
         closeEdit();
         setSettingsOpen(false);
         setSearchOpen(false);
+        setSearch('');
+        return;
       }
 
-      if (event.metaKey && event.key.toLowerCase() === 'n') {
+      if (event.defaultPrevented || event.isComposing) return;
+      const commandKey = event.metaKey || event.ctrlKey;
+
+      if (commandKey && event.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        void queryClient.invalidateQueries({ queryKey: ['events'] });
+        return;
+      }
+
+      if (isEditingField(event.target) || createDate || editingEvent || settingsOpen) return;
+
+      if (commandKey && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         openCreate(selectedDate);
       }
 
-      if (event.metaKey && event.key.toLowerCase() === 'f') {
+      if (commandKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         setSearchOpen(true);
       }
 
-      if (event.metaKey && event.key === ',') {
+      if (commandKey && event.key === ',') {
         event.preventDefault();
         setSettingsOpen(true);
       }
@@ -197,23 +224,20 @@ export function App(): React.JSX.Element {
         setSelectedDate(startOfDay(new Date()));
       }
 
-      if (event.key === 'ArrowLeft') {
+      if (event.key === 'ArrowLeft' && !commandKey && !event.altKey) {
+        event.preventDefault();
         setSelectedDate(addDays(selectedDate, -1));
       }
 
-      if (event.key === 'ArrowRight') {
-        setSelectedDate(addDays(selectedDate, 1));
-      }
-
-      if (event.metaKey && event.key.toLowerCase() === 'r') {
+      if (event.key === 'ArrowRight' && !commandKey && !event.altKey) {
         event.preventDefault();
-        void queryClient.invalidateQueries({ queryKey: ['events'] });
+        setSelectedDate(addDays(selectedDate, 1));
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeCreate, closeEdit, openCreate, queryClient, selectedDate, setSearchOpen, setSelectedDate, setSettingsOpen]);
+  }, [closeCreate, closeEdit, createDate, editingEvent, openCreate, queryClient, selectedDate, setSearch, setSearchOpen, setSelectedDate, setSettingsOpen, settingsOpen]);
 
   const calendars = calendarsQuery.data ?? [];
   const accounts = accountsQuery.data ?? [];
@@ -237,23 +261,14 @@ export function App(): React.JSX.Element {
     }
 
     const nextIds = Array.from(existing);
-    patchSettings({ selectedCalendarIds: nextIds.length ? nextIds : [calendarId] });
-  }
-
-  function updateEventPayload(event: CalendarEvent, input: CreateEventInput): UpdateEventInput {
-    return {
-      ...input,
-      id: event.id,
-      calendarId: event.calendarId,
-      addVideoCall: Boolean(event.video),
-      videoProvider: undefined,
-    };
+    patchSettings({ selectedCalendarIds: nextIds });
   }
 
   return (
     <>
       <AppShell
         calendars={calendars}
+        accounts={accounts}
         eventCountLabel={eventCountLabel}
         weekEventCountLabel={weekEventCountLabel}
         selectedCalendarIds={effectiveSettings.selectedCalendarIds}
@@ -265,7 +280,10 @@ export function App(): React.JSX.Element {
         onCalendarSet={(calendarIds) => patchSettings({ selectedCalendarIds: calendarIds })}
         onDateChange={(date) => setSelectedDate(startOfDay(date))}
         onSearchChange={setSearch}
-        onSearchToggle={() => setSearchOpen(!searchOpen)}
+        onSearchToggle={() => {
+          if (searchOpen) setSearch('');
+          setSearchOpen(!searchOpen);
+        }}
         onCreate={() => openCreate(selectedDate)}
         onSettings={() => setSettingsOpen(true)}
       >
@@ -277,6 +295,12 @@ export function App(): React.JSX.Element {
           now={now}
           weatherForecast={showWeather ? weatherForecast : null}
           isLoading={eventsQuery.isLoading || calendarsQuery.isLoading || settingsQuery.isLoading}
+          error={eventsQuery.error?.message || calendarsQuery.error?.message || settingsQuery.error?.message || ''}
+          onRetry={() => {
+            void queryClient.invalidateQueries({ queryKey: ['events'] });
+            void queryClient.invalidateQueries({ queryKey: ['calendars'] });
+            void queryClient.invalidateQueries({ queryKey: ['settings'] });
+          }}
           onCreate={openCreate}
           onEdit={openEdit}
         />
@@ -286,13 +310,14 @@ export function App(): React.JSX.Element {
         date={createDate}
         calendars={calendars}
         defaultCalendarId={effectiveSettings.defaultCalendarId}
+        defaultDurationMinutes={effectiveSettings.defaultDurationMinutes}
         onClose={closeCreate}
         onSubmit={(input) => createMutation.mutateAsync(input).then(() => undefined)}
       />
 
       <CreateEventModal
         mode="edit"
-        date={editingEvent ? new Date(editingEvent.startsAt) : null}
+        date={null}
         event={editingEvent}
         calendars={calendars}
         defaultCalendarId={effectiveSettings.defaultCalendarId}
@@ -325,6 +350,7 @@ export function App(): React.JSX.Element {
               ? disconnectVideoMutation.error.message
               : ''
         }
+        settingsError={settingsMutation.error instanceof Error ? settingsMutation.error.message : ''}
         onClose={() => setSettingsOpen(false)}
         onConnect={(provider) => connectMutation.mutate(provider)}
         onDisconnect={(accountId) => disconnectMutation.mutate(accountId)}
@@ -338,8 +364,7 @@ export function App(): React.JSX.Element {
 }
 
 function countEventsForDate(events: CalendarEvent[], date: Date): number {
-  const dayStart = startOfDay(date).getTime();
-  return events.filter((event) => startOfDay(new Date(event.startsAt)).getTime() === dayStart).length;
+  return events.filter((event) => eventOccursOnDate(event, date)).length;
 }
 
 function formatEventCountLabel(eventCount: number, date: Date): string {
@@ -362,5 +387,5 @@ function formatEventCountLabel(eventCount: number, date: Date): string {
 
 function formatWeekEventCountLabel(eventCount: number): string {
   const eventText = eventCount === 1 ? 'event' : 'events';
-  return `${eventCount} ${eventText} this week`;
+  return `${eventCount} ${eventText} over 7 days`;
 }

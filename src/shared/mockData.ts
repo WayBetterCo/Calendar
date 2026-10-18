@@ -51,7 +51,9 @@ export const mockSettings: AppSettings = {
 };
 
 function at(base: Date, dayOffset: number, hour: number, minute = 0): string {
-  return setMinutes(setHours(addDays(base, dayOffset), hour), minute).toISOString();
+  const date = setMinutes(setHours(addDays(base, dayOffset), hour), minute);
+  date.setSeconds(0, 0);
+  return date.toISOString();
 }
 
 export function getMockEvents(now = new Date()): CalendarEvent[] {

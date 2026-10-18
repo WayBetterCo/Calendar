@@ -67,26 +67,18 @@ export function Header({
         <button type="button" className="nav-button" aria-label="Previous day" onClick={() => onDateChange(addDays(selectedDate, -1))}>
           <ChevronLeft size={16} />
         </button>
-        <div className={cn('selected-date', !selectedDateIsToday && 'jump-to-today')}>
+        <div className="selected-date">
           <span className="selected-date-label">{formatSelectedDate(selectedDate)}</span>
-          {selectedDateIsToday ? (
-            <DatePickerPopover value={selectedDate} onChange={onDateChange} />
-          ) : (
-            <button
-              type="button"
-              className="date-jump-button"
-              aria-label="Jump to today"
-              title="Jump to today"
-              onClick={() => onDateChange(startOfDay(new Date()))}
-            >
-              Today
-            </button>
-          )}
+          <DatePickerPopover value={selectedDate} onChange={onDateChange} />
         </div>
         <button type="button" className="nav-button" aria-label="Next day" onClick={() => onDateChange(addDays(selectedDate, 1))}>
           <ChevronRight size={16} />
         </button>
       </div>
+
+      {!selectedDateIsToday ? (
+        <button type="button" className="today-jump" onClick={() => onDateChange(startOfDay(new Date()))}>Jump to today</button>
+      ) : null}
 
       {searchOpen ? (
         <input
@@ -102,14 +94,8 @@ export function Header({
       <div className="calendar-filter-row" aria-label="Calendar filters">
         <button
           type="button"
-          className={cn('calendar-chip', selectedCalendarIds.length === calendars.length && 'active')}
-          onClick={() => {
-            const nextIds =
-              selectedCalendarIds.length === calendars.length
-                ? [calendars.find((calendar) => calendar.isPrimary)?.id ?? calendars[0]?.id].filter(Boolean)
-                : calendars.map((calendar) => calendar.id);
-            onCalendarSet(nextIds);
-          }}
+          className={cn('calendar-chip', calendars.length > 0 && calendars.every((calendar) => selectedCalendarIds.includes(calendar.id)) && 'active')}
+          onClick={() => onCalendarSet(calendars.map((calendar) => calendar.id))}
         >
           All Calendars
         </button>

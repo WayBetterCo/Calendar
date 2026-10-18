@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { writeJsonStore } from './jsonStore';
 import { app, safeStorage } from 'electron';
 import type { CalendarAccount, CalendarProvider, CreatableVideoProvider, VideoAccount } from '../../shared/calendar';
 
@@ -31,20 +32,30 @@ function videoCredentialsPath(): string {
 
 function encryptTokens(tokens: ProviderTokens): string {
   if (safeStorage.isEncryptionAvailable()) {
-    return safeStorage.encryptString(JSON.stringify(tokens)).toString('base64');
+    return `encrypted:${safeStorage.encryptString(JSON.stringify(tokens)).toString('base64')}`;
   }
 
-  return Buffer.from(JSON.stringify(tokens), 'utf8').toString('base64');
+  throw new Error('Secure credential storage is unavailable. Unlock your system keychain and try connecting again.');
 }
 
 function decryptTokens(encryptedTokens: string): ProviderTokens {
-  const buffer = Buffer.from(encryptedTokens, 'base64');
-
-  if (safeStorage.isEncryptionAvailable()) {
-    return JSON.parse(safeStorage.decryptString(buffer)) as ProviderTokens;
+  const encoded = encryptedTokens.replace(/^encrypted:/, '');
+  const buffer = Buffer.from(encoded, 'base64');
+  // Legacy versions stored unmarked base64 JSON when the keychain was unavailable.
+  if (!encryptedTokens.startsWith('encrypted:')) {
+    try {
+      const legacy = JSON.parse(buffer.toString('utf8')) as ProviderTokens;
+      if (legacy.accessToken && legacy.provider) return legacy;
+    } catch { /* Continue with legacy encrypted storage. */ }
   }
-
-  return JSON.parse(buffer.toString('utf8')) as ProviderTokens;
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Saved accounts require access to your system keychain. Unlock it and try again.');
+  }
+  try {
+    return JSON.parse(safeStorage.decryptString(buffer)) as ProviderTokens;
+  } catch {
+    throw new Error('Saved credentials could not be unlocked. Reconnect the account in Settings.');
+  }
 }
 
 function readRecords(): StoredAccount[] {
@@ -54,9 +65,11 @@ function readRecords(): StoredAccount[] {
   }
 
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as StoredAccount[];
+    const records: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!Array.isArray(records) || records.some((record) => !record?.account?.id || typeof record.encryptedTokens !== 'string')) throw new Error('Invalid account data.');
+    return records as StoredAccount[];
   } catch {
-    return [];
+    throw new Error('Saved calendar accounts could not be read. Your account file has been preserved.');
   }
 }
 
@@ -67,22 +80,22 @@ function readVideoRecords(): StoredVideoAccount[] {
   }
 
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as StoredVideoAccount[];
+    const records: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!Array.isArray(records) || records.some((record) => !record?.account?.id || typeof record.encryptedTokens !== 'string')) throw new Error('Invalid account data.');
+    return records as StoredVideoAccount[];
   } catch {
-    return [];
+    throw new Error('Saved video accounts could not be read. Your account file has been preserved.');
   }
 }
 
 function writeRecords(records: StoredAccount[]): void {
   const path = credentialsPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(records, null, 2));
+  writeJsonStore(path, records);
 }
 
 function writeVideoRecords(records: StoredVideoAccount[]): void {
   const path = videoCredentialsPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(records, null, 2));
+  writeJsonStore(path, records);
 }
 
 export function listAccounts(): CalendarAccount[] {
@@ -114,7 +127,9 @@ export function getTokens(accountId: string): ProviderTokens | null {
     return null;
   }
 
-  return decryptTokens(record.encryptedTokens);
+  const tokens = decryptTokens(record.encryptedTokens);
+  if (!record.encryptedTokens.startsWith('encrypted:') && safeStorage.isEncryptionAvailable()) saveTokens(accountId, tokens);
+  return tokens;
 }
 
 export function saveTokens(accountId: string, tokens: ProviderTokens): void {
@@ -145,7 +160,10 @@ export function removeVideoAccount(accountId: string): void {
 
 export function getVideoTokens(accountId: string): ProviderTokens | null {
   const record = readVideoRecords().find((item) => item.account.id === accountId);
-  return record ? decryptTokens(record.encryptedTokens) : null;
+  if (!record) return null;
+  const tokens = decryptTokens(record.encryptedTokens);
+  if (!record.encryptedTokens.startsWith('encrypted:') && safeStorage.isEncryptionAvailable()) saveVideoTokens(accountId, tokens);
+  return tokens;
 }
 
 export function saveVideoTokens(accountId: string, tokens: ProviderTokens): void {

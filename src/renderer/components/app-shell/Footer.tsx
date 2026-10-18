@@ -1,12 +1,13 @@
 import { Settings } from 'lucide-react';
-import type { CalendarSource } from '../../types/calendar';
+import type { CalendarAccount } from '../../types/calendar';
 
 type FooterProps = {
-  calendars: CalendarSource[];
+  accounts: CalendarAccount[];
   onSettings: () => void;
 };
 
-export function Footer({ calendars, onSettings }: FooterProps): React.JSX.Element {
+export function Footer({ accounts, onSettings }: FooterProps): React.JSX.Element {
+  const providers = [...new Set(accounts.map((account) => account.provider))];
   return (
     <footer className="app-footer">
       <button type="button" className="footer-settings" onClick={onSettings}>
@@ -14,9 +15,8 @@ export function Footer({ calendars, onSettings }: FooterProps): React.JSX.Elemen
         <span>Settings</span>
       </button>
       <div className="connection-status">
-        <span>Connected</span>
-        <span className="provider-badge">Google</span>
-        {calendars.length > 3 ? <span className="overflow-badge">+{calendars.length - 3}</span> : null}
+        <span>{providers.length ? 'Connected' : 'Local demo'}</span>
+        {providers.map((provider) => <span className="provider-badge" key={provider}>{provider === 'google' ? 'Google' : provider === 'microsoft' ? 'Microsoft' : provider}</span>)}
       </div>
     </footer>
   );

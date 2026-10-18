@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BrowserWindow, app, nativeTheme, screen } from 'electron';
 import { appIconPath } from './resources';
+import { isExternalWebUrl, openExternalWebUrl } from './externalUrl';
 
 type SavedBounds = {
   width: number;
@@ -28,8 +29,13 @@ function readBounds(): SavedBounds {
   if (existsSync(path)) {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as SavedBounds;
-      if (parsed.width && parsed.height) {
-        return parsed;
+      if ([parsed.width, parsed.height, parsed.x ?? 0, parsed.y ?? 0].every(Number.isFinite) && parsed.width > 0 && parsed.height > 0) {
+        const display = screen.getDisplayMatching({ x: parsed.x ?? 0, y: parsed.y ?? 0, width: parsed.width, height: parsed.height }).workArea;
+        const width = Math.min(Math.max(parsed.width, defaultBounds.minWidth), defaultBounds.maxWidth, display.width);
+        const height = Math.min(Math.max(parsed.height, defaultBounds.minHeight), display.height);
+        return { width, height,
+          x: Math.min(Math.max(parsed.x ?? display.x, display.x), display.x + display.width - width),
+          y: Math.min(Math.max(parsed.y ?? display.y, display.y), display.y + display.height - height) };
       }
     } catch {
       // Fall back to the right-edge default when the saved shape is unreadable.
@@ -65,7 +71,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: defaultBounds.minHeight,
     title: 'WayBetter Calendar',
     icon: appIconPath(),
-    show: false,
+    show: true,
     vibrancy: 'sidebar',
     visualEffectState: 'active',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#272822' : '#f8f8f9',
@@ -79,13 +85,20 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
-
   mainWindow.on('resize', () => persistBounds(mainWindow));
   mainWindow.on('move', () => persistBounds(mainWindow));
   mainWindow.on('close', () => persistBounds(mainWindow));
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalWebUrl(url)) void openExternalWebUrl(url).catch(console.error);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) {
+      event.preventDefault();
+      if (isExternalWebUrl(url)) void openExternalWebUrl(url).catch(console.error);
+    }
+  });
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
