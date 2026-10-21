@@ -31,6 +31,11 @@ const api = {
     },
   },
   calendar: {
+    onRefreshRequested(callback: () => void): () => void {
+      const listener = () => callback();
+      ipcRenderer.on('calendar:refresh-requested', listener);
+      return () => ipcRenderer.removeListener('calendar:refresh-requested', listener);
+    },
     listEvents(input: ListEventsInput): Promise<CalendarEvent[]> {
       return ipcRenderer.invoke('calendar:list-events', input);
     },

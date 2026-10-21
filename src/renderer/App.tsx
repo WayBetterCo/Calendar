@@ -6,10 +6,12 @@ import { AppShell } from './components/app-shell/AppShell';
 import { CreateEventModal } from './components/event-create/CreateEventModal';
 import { SettingsView } from './components/settings/SettingsView';
 import { calendarApi } from './api/calendarApi';
+import { getDateAfterRollover, startAgendaClock } from './lib/agendaClock';
 import { getAgendaRange } from './lib/dates';
 import { updateEventPayload } from './lib/eventDraft';
 import { eventOccursOnDate } from './lib/events';
 import { isEditingField } from './lib/shortcuts';
+import { startCalendarSync } from './lib/calendarSync';
 import { useAgendaStore } from './state/useAgendaStore';
 import { useSettingsStore } from './state/useSettingsStore';
 import type { AppSettings, CalendarEvent, CreateEventInput, DeleteEventInput, UpdateEventInput, WeatherForecast } from './types/calendar';
@@ -55,6 +57,12 @@ export function App(): React.JSX.Element {
     queryKey: ['video-accounts'],
     queryFn: calendarApi.listVideoAccounts,
   });
+
+  useEffect(() => startCalendarSync(queryClient, {
+    window,
+    document,
+    subscribeToResume: calendarApi.onRefreshRequested,
+  }), [queryClient]);
 
   const effectiveSettings = settings ?? settingsQuery.data ?? mockSettings;
   const showWeather = effectiveSettings.showWeather ?? true;
@@ -142,9 +150,15 @@ export function App(): React.JSX.Element {
   }, [settingsQuery.data, setSettings]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
+    return startAgendaClock(
+      (currentNow, previousNow) => {
+        const rolloverDate = getDateAfterRollover(useAgendaStore.getState().selectedDate, previousNow, currentNow);
+        if (rolloverDate) setSelectedDate(rolloverDate);
+        setNow(currentNow);
+      },
+      calendarApi.onRefreshRequested,
+    );
+  }, [setSelectedDate]);
 
   useEffect(() => {
     let cancelled = false;

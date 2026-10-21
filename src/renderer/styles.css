@@ -259,7 +259,8 @@ textarea:focus-visible {
   transition: opacity 140ms ease;
 }
 
-.selected-date.jump-to-today:hover .selected-date-label {
+.selected-date.jump-to-today:hover .selected-date-label,
+.selected-date.jump-to-today:focus-within .selected-date-label {
   opacity: 0;
 }
 
@@ -285,22 +286,16 @@ textarea:focus-visible {
   opacity: 1;
 }
 
+.date-jump-button:focus-visible {
+  outline-offset: -3px;
+}
+
 .date-input {
   position: absolute;
   inset: 0;
   width: 100%;
   opacity: 0;
   cursor: pointer;
-}
-
-.today-jump {
-  display: block;
-  margin: 5px auto 0;
-  padding: 3px 7px;
-  color: hsl(var(--primary));
-  background: transparent;
-  border-radius: 5px;
-  font-size: 11px;
 }
 
 .search-input {

@@ -67,18 +67,20 @@ export function Header({
         <button type="button" className="nav-button" aria-label="Previous day" onClick={() => onDateChange(addDays(selectedDate, -1))}>
           <ChevronLeft size={16} />
         </button>
-        <div className="selected-date">
-          <span className="selected-date-label">{formatSelectedDate(selectedDate)}</span>
-          <DatePickerPopover value={selectedDate} onChange={onDateChange} />
+        <div className={cn('selected-date', !selectedDateIsToday && 'jump-to-today')}>
+          <span className="selected-date-label" aria-hidden={!selectedDateIsToday}>{formatSelectedDate(selectedDate)}</span>
+          {selectedDateIsToday ? (
+            <DatePickerPopover value={selectedDate} onChange={onDateChange} />
+          ) : (
+            <button type="button" className="date-jump-button" onClick={() => onDateChange(startOfDay(new Date()))}>
+              Jump to today
+            </button>
+          )}
         </div>
         <button type="button" className="nav-button" aria-label="Next day" onClick={() => onDateChange(addDays(selectedDate, 1))}>
           <ChevronRight size={16} />
         </button>
       </div>
-
-      {!selectedDateIsToday ? (
-        <button type="button" className="today-jump" onClick={() => onDateChange(startOfDay(new Date()))}>Jump to today</button>
-      ) : null}
 
       {searchOpen ? (
         <input

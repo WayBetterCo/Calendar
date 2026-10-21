@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { BrowserWindow, app, nativeImage, nativeTheme, session } from 'electron';
+import { BrowserWindow, app, nativeImage, nativeTheme, powerMonitor, session } from 'electron';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
 import { appIconPath } from './resources';
@@ -47,6 +47,14 @@ app.whenReady().then(() => {
 
   createMainWindow();
   applySystemSettings(readSettings());
+
+  const refreshCalendars = (): void => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('calendar:refresh-requested');
+    }
+  };
+  powerMonitor.on('resume', refreshCalendars);
+  powerMonitor.on('unlock-screen', refreshCalendars);
 
   nativeTheme.on('updated', () => {
     const theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';

@@ -74,6 +74,9 @@ function listBrowserEvents(input: ListEventsInput): CalendarEvent[] {
 }
 
 export const calendarApi = {
+  onRefreshRequested(callback: () => void): () => void {
+    return window.waybetterCalendar?.calendar.onRefreshRequested(callback) ?? (() => undefined);
+  },
   listEvents(input: ListEventsInput): Promise<CalendarEvent[]> {
     if (!hasPreloadApi()) {
       return Promise.resolve(listBrowserEvents(input));

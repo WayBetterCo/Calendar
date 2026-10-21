@@ -101,6 +101,32 @@ describe('desktop local calendar persistence', () => {
 });
 
 describe('provider calendar responses', () => {
+  it.each(['google', 'microsoft'] as const)('reads new %s invitations on subsequent syncs and recovers after a failed request', async (provider) => {
+    saveAccount(account(provider), tokens(provider));
+    const selected = calendar(provider);
+    let added = false;
+    let offline = false;
+    const rawEvent = {
+      id: 'new-invitation', summary: 'External invitation', subject: 'External invitation',
+      start: { dateTime: '2026-10-17T17:00:00Z' }, end: { dateTime: '2026-10-17T18:00:00Z' },
+    };
+    const fetch = vi.fn(async (url: string) => {
+      if (url.includes('/calendarList')) return json({ items: [{ id: 'primary', accessRole: 'owner' }] });
+      if (new URL(url).pathname === '/v1.0/me/calendars') return json({ value: [{ id: 'primary', canEdit: true }] });
+      if (offline) throw new Error('Network offline');
+      return json(provider === 'google' ? { items: added ? [rawEvent] : [] } : { value: added ? [rawEvent] : [] });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const input = { ...range, calendarIds: [selected.id] };
+
+    expect(await listEvents(input)).toEqual([]);
+    added = true;
+    offline = true;
+    await expect(listEvents(input)).rejects.toThrow('Network offline');
+    offline = false;
+    expect(await listEvents(input)).toMatchObject([{ providerEventId: 'new-invitation', title: 'External invitation' }]);
+  });
+
   it('loads every Google page and omits cancelled events without valid dates', async () => {
     saveAccount(account('google'), tokens('google'));
     const fetch = vi.fn(async (url: string) => {

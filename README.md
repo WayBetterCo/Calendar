@@ -4,6 +4,8 @@ A compact Electron desktop calendar with local events, Google Calendar and Micro
 
 Agenda meeting buttons use the same colored provider logos as Settings. Events with a physical location show a map pin that opens Google Maps; events with both a location and a video link show both actions.
 
+Connected calendars refresh automatically every minute and when you return to the app, wake the computer, or reconnect to the network. Today's agenda advances at local midnight, including after sleep; browsing another date preserves that selection. Hover or focus the selected date to jump back to today without changing the header height.
+
 ## Run locally
 
 Use Node.js 24 LTS, matching `.nvmrc`:

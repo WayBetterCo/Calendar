@@ -47,7 +47,55 @@ try {
     return { updated: changed.title === 'Updated after restart' && !changed.description, deleted, savedSettings: settings.timeFormat === '24h' && settings.showWeather === false, unsafeLinkRejected };
   })()`);
   assert.deepEqual(afterRestart, { updated: true, deleted: true, savedSettings: true, unsafeLinkRejected: true });
-  console.log(`Packaged smoke test passed: startup, preload, React, event CRUD, restart persistence, settings and URL validation (${target}).`);
+  const dateNavigation = await running.evaluate(`(async () => {
+    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    const settle = async () => { await frame(); await frame(); };
+    const style = document.createElement('style');
+    style.textContent = '* { transition: none !important; }';
+    document.head.append(style);
+    const header = document.querySelector('.app-header');
+    const initialHeight = header.getBoundingClientRect().height;
+    document.querySelector('[aria-label="Previous day"]').click();
+    await settle();
+    const jump = document.querySelector('.date-jump-button');
+    if (!jump) throw new Error('Browsing away from today did not expose the date return action.');
+    const browsingHeight = header.getBoundingClientRect().height;
+    jump.focus();
+    await settle();
+    const focusShowsJump = getComputedStyle(jump).opacity === '1'
+      && getComputedStyle(document.querySelector('.selected-date-label')).opacity === '0';
+    const jumpInsideDate = Boolean(document.querySelector('.selected-date .date-jump-button'));
+    const noExtraRow = !document.querySelector('.today-jump');
+    jump.click();
+    await settle();
+    const now = new Date();
+    const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+    const returnedToToday = document.querySelector('[aria-label="Select agenda date"]')?.value === today;
+    const stableHeight = initialHeight === browsingHeight && initialHeight === header.getBoundingClientRect().height;
+    style.remove();
+    return { focusShowsJump, jumpInsideDate, noExtraRow, returnedToToday, stableHeight };
+  })()`);
+  assert.deepEqual(dateNavigation, { focusShowsJump: true, jumpInsideDate: true, noExtraRow: true, returnedToToday: true, stableHeight: true });
+  const externalEventRefreshed = await running.evaluate(`(async () => {
+    const api = window.waybetterCalendar;
+    const now = new Date();
+    const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+    // Bypass the renderer mutation to simulate an event arriving from elsewhere.
+    const event = await api.calendar.createEvent({ calendarId: ${JSON.stringify(result.calendarId)}, title: 'External refresh smoke event', date, startTime: '10:00', endTime: '10:30', addVideoCall: false, guests: [] });
+    try {
+      window.dispatchEvent(new Event('focus'));
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (document.body.textContent.includes(event.title)) return true;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      return false;
+    } finally {
+      await api.calendar.deleteEvent({ id: event.id, calendarId: event.calendarId });
+    }
+  })()`);
+  assert.equal(externalEventRefreshed, true, 'Returning to the app did not load an externally added event.');
+  console.log(`Packaged smoke test passed: startup, preload, React, event CRUD, restart persistence, settings, URL validation, stable date navigation and automatic focus refresh (${target}).`);
 } finally {
   await running?.stop();
   rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
